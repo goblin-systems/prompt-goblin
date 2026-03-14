@@ -20,7 +20,7 @@
         "resizable": true,
         "center": true,
         "visible": true,
-        "decorations": true
+        "decorations": false
       },
       {
         "label": "overlay",
@@ -41,11 +41,6 @@
     ],
     "security": {
       "csp": null
-    },
-    "trayIcon": {
-      "id": "main-tray",
-      "iconPath": "icons/icon.ico",
-      "tooltip": "Prompt Goblin"
     }
   },
   "bundle": {
@@ -60,7 +55,7 @@
     ]
   },
   "plugins": {
-    "global-shortcut": {},
-    "store": {}
+    "global-shortcut": null,
+    "store": null
   }
 }

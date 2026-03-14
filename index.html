@@ -4,18 +4,44 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Prompt Goblin</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="stylesheet" href="/src/styles.css" />
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
     <main class="settings-container">
-      <header class="settings-header">
-        <h1>Prompt Goblin</h1>
-        <span class="version">v0.1.0</span>
-      </header>
+      <div class="window-frame-row" data-tauri-drag-region>
+        <div class="window-title">Prompt Goblin</div>
+        <div class="window-actions" aria-label="Window controls">
+          <button
+            id="window-close-btn"
+            class="icon-btn window-action-btn"
+            type="button"
+            title="Close"
+            aria-label="Close window"
+          >
+            &times;
+          </button>
+        </div>
+      </div>
 
       <section class="settings-section">
-        <h2>API Key</h2>
+        <div class="section-heading-row">
+          <h2>GEMINI API KEY</h2>
+          <button
+            id="api-key-help-btn"
+            class="icon-btn help-btn"
+            type="button"
+            title="How to get a Gemini API key"
+            aria-label="How to get a Gemini API key"
+          >
+            ?
+          </button>
+        </div>
         <div class="field">
           <input
             type="password"
@@ -33,44 +59,107 @@
             <span class="status-dot"></span>
             <span class="status-text">Not configured</span>
           </span>
+          <button id="test-api-key-btn" class="secondary-btn" type="button">
+            Test
+          </button>
         </div>
       </section>
 
       <section class="settings-section">
-        <h2>Hotkey</h2>
-        <div class="hotkey-display">
-          <kbd>Alt</kbd> + <kbd>Super</kbd> + <kbd>G</kbd>
+        <h2>Model</h2>
+        <div class="field">
+          <select id="live-model-select"></select>
+          <button id="refresh-models-btn" class="secondary-btn" type="button">
+            Refresh
+          </button>
         </div>
-        <p class="hint">Press the hotkey to start/stop voice recording</p>
+        <p class="hint" id="live-model-hint">
+          Choose a live model for transcription. The list is fetched from Gemini API.
+        </p>
+      </section>
+
+      <section class="settings-section">
+        <h2>Hotkey</h2>
+        <div class="field">
+          <input
+            type="text"
+            id="hotkey-input"
+            placeholder="Alt+G"
+            spellcheck="false"
+            autocomplete="off"
+          />
+        </div>
+        <p class="hint">
+          Press the hotkey to start/stop recording.
+        </p>
+      </section>
+
+      <section class="settings-section">
+        <h2>Microphone</h2>
+        <div class="field">
+          <select id="microphone-select"></select>
+          <button id="refresh-microphones-btn" class="secondary-btn" type="button">
+            Refresh
+          </button>
+        </div>
+        <p class="hint">
+          Pick the input device used for recording. If unavailable, default input is used.
+        </p>
+        <div class="mic-test-panel">
+          <div class="mic-wave-wrap">
+            <canvas id="mic-wave-canvas" height="64"></canvas>
+          </div>
+          <div class="mic-test-controls">
+            <button id="mic-test-btn" class="secondary-btn" type="button">Start mic test</button>
+            <span id="mic-test-status" class="hint">Idle</span>
+            <span id="mic-signal-indicator" class="status-indicator disconnected">
+              <span class="status-dot"></span>
+              <span class="status-text">No signal</span>
+            </span>
+          </div>
+          <p id="mic-test-transcript" class="hint mic-test-transcript">Transcript: -</p>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <h2>Debug</h2>
+        <label class="checkbox-label">
+          <input type="checkbox" id="debug-logging-checkbox" />
+          <span>Enable debug logging to local file</span>
+        </label>
+        <button id="open-debug-folder-btn" class="secondary-btn" type="button">
+          Open debug logs folder
+        </button>
+        <p class="hint" id="debug-log-path">Debug logs are disabled.</p>
       </section>
 
       <section class="settings-section">
         <h2>Typing Mode</h2>
         <div class="radio-group">
           <label class="radio-label">
-            <input type="radio" name="typing-mode" value="all_at_once" checked />
+            <input type="radio" name="typing-mode" value="all_at_once" />
             <span>Type all at once</span>
-            <span class="badge default">default</span>
           </label>
           <label class="radio-label">
-            <input type="radio" name="typing-mode" value="incremental" />
+            <input type="radio" name="typing-mode" value="incremental" checked />
             <span>Type incrementally</span>
+            <span class="badge default">default</span>
             <span class="badge beta">beta</span>
           </label>
         </div>
         <p class="hint" id="typing-mode-hint">
-          Text is typed after you stop recording.
+          Text appears as you speak. May cause issues in some apps.
         </p>
       </section>
 
       <section class="settings-section">
         <h2>Voice Detection</h2>
         <label class="checkbox-label">
-          <input type="checkbox" id="auto-stop-checkbox" />
+          <input type="checkbox" id="auto-stop-checkbox" checked />
           <span>Auto-stop on silence</span>
           <span class="badge beta">beta</span>
         </label>
-        <div class="inline-field" id="silence-timeout-field" style="display: none;">
+        <div class="inline-field" id="silence-timeout-field" style="display: flex;">
           <label for="silence-timeout">Silence timeout:</label>
           <input
             type="number"
@@ -78,7 +167,7 @@
             min="0.5"
             max="10"
             step="0.5"
-            value="2.0"
+            value="4.0"
           />
           <span class="unit">seconds</span>
         </div>
@@ -107,9 +196,47 @@
       </section>
 
       <footer class="settings-footer">
-        <button id="save-btn" class="primary-btn">Save</button>
+        <button id="reset-defaults-btn" class="secondary-btn" type="button">
+          Reset to defaults
+        </button>
         <span id="save-status" class="save-status"></span>
       </footer>
+
+      <div class="settings-brand-art" aria-hidden="true">
+        <img src="/settings-goblin-transparent.png" alt="" class="settings-brand-image" />
+      </div>
+      <p class="settings-goblin-note">
+        Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking"
+        in this establishment.
+      </p>
+
+      <div id="api-key-help-modal" class="modal-backdrop" hidden>
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="api-key-help-title"
+        >
+          <div class="modal-header">
+            <h3 id="api-key-help-title">Get a Gemini API key</h3>
+            <button
+              id="close-api-key-help-btn"
+              class="icon-btn modal-close-btn"
+              type="button"
+              aria-label="Close API key instructions"
+            >
+              &times;
+            </button>
+          </div>
+          <ol class="modal-list">
+            <li>Go to Google AI Studio (aistudio.google.com/apikey).</li>
+            <li>Sign in, then click <strong>Create API key</strong>.</li>
+            <li>Copy the key and paste it into the Gemini API key field.</li>
+            <li>Click <strong>Test</strong> to confirm the key works.</li>
+          </ol>
+          <p class="hint">Keep your API key private and never share it publicly.</p>
+        </div>
+      </div>
     </main>
   </body>
 </html>

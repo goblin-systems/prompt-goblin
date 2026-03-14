@@ -1,7 +1,59 @@
-# Tauri + Vanilla TS
+# Prompt Goblin
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+Voice-to-text desktop app powered by Gemini, built with Tauri + Vanilla TypeScript.
+> Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking" in this establishment.
 
-## Recommended IDE Setup
+## Disclaimer
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+This project was created with an AI coding agent.
+Development was done using OpenCode with a mixture of models, predominantly GPT-5.3 Codex and Claude Opus 4.6.
+
+## Prerequisites
+
+- [Bun](https://bun.sh/)
+- [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
+- Windows build tools for Rust (`MSVC`) and WebView2 runtime on Windows
+
+## Development
+
+Install dependencies:
+
+```bash
+bun install
+```
+
+Run the app in development mode:
+
+```bash
+bun run tauri dev
+```
+
+## Build
+
+Build the frontend assets:
+
+```bash
+bun run build
+```
+
+Build the desktop app bundle:
+
+```bash
+bun run tauri build
+```
+
+## Output
+
+On Windows, the installer is generated at:
+
+`src-tauri/target/release/bundle/nsis/`
+
+## Contribution Guide
+
+Contributions are accepted in the form of GitHub issues that define specifications for bug fixes and improvements.
+
+Please provide a balanced level of detail: enough context and requirements to make implementation clear, but not so much that the specification becomes bloated.
+
+This process ensures implementation is done by a trusted AI agent run by the repository maintainer, and is required for security reasons.
+
+Direct pull requests are not accepted. Start with an issue first.

@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "bun run test:unit",
+    "test:unit": "bun test tests/gemini.test.ts tests/main-utils.test.ts tests/main-model-cache.test.ts",
+    "test:integration": "bun test tests/gemini.integration.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

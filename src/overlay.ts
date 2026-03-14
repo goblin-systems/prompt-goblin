@@ -9,6 +9,10 @@ const overlayTranscript = document.getElementById(
   "overlay-transcript"
 ) as HTMLElement;
 
+window.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+});
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;

@@ -27,8 +27,8 @@ pub fn type_text_incremental(text: String, backspaces: u32) -> Result<(), String
 #[cfg(target_os = "windows")]
 fn send_text_native(text: &str) -> Result<(), String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-        KEYEVENTF_UNICODE, VIRTUAL_KEY,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        VIRTUAL_KEY,
     };
 
     let mut inputs: Vec<INPUT> = Vec::new();
@@ -128,11 +128,9 @@ fn send_backspace_native() -> Result<(), String> {
 
 #[cfg(not(target_os = "windows"))]
 fn send_text_native(text: &str) -> Result<(), String> {
-    Err(
-        "Keyboard simulation not implemented for this platform. \
+    Err("Keyboard simulation not implemented for this platform. \
          Contributions welcome: implement using xdotool (Linux) or CGEventPost (macOS)."
-            .to_string(),
-    )
+        .to_string())
 }
 
 #[cfg(not(target_os = "windows"))]

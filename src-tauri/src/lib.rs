@@ -1,4 +1,5 @@
 mod audio;
+mod debug_log;
 mod keyboard;
 
 use tauri::{
@@ -13,21 +14,28 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::default().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            audio::list_input_devices,
+            audio::start_mic_monitoring,
+            audio::stop_mic_monitoring,
+            audio::stop_mic_monitoring_with_recording,
             audio::start_recording,
             audio::stop_recording,
+            debug_log::set_debug_logging_enabled,
+            debug_log::write_debug_log,
+            debug_log::open_debug_log_folder,
             keyboard::type_text,
             keyboard::type_text_incremental,
         ])
         .manage(audio::AudioState::default())
+        .manage(debug_log::DebugLogState::default())
         .setup(|app| {
             // Build tray menu
-            let settings_item =
-                MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit_item])?;
 
             // Build tray icon
-            let _tray = TrayIconBuilder::with_id("main-tray")
+            let mut tray_builder = TrayIconBuilder::with_id("main-tray")
                 .menu(&menu)
                 .tooltip("Prompt Goblin")
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -50,16 +58,23 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-                })
-                .build(app)?;
+                });
+
+            if let Some(icon) = app.default_window_icon().cloned() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_icon(icon.clone());
+                }
+                tray_builder = tray_builder.icon(icon);
+            }
+
+            let _tray = tray_builder.build(app)?;
 
             // Position overlay window at top-center of primary monitor
             if let Some(overlay) = app.get_webview_window("overlay") {
                 if let Ok(Some(monitor)) = overlay.primary_monitor() {
                     let screen_width = monitor.size().width as f64 / monitor.scale_factor();
                     let x = (screen_width / 2.0 - 170.0).max(0.0);
-                    let _ =
-                        overlay.set_position(tauri::PhysicalPosition::new(x as i32, 40));
+                    let _ = overlay.set_position(tauri::PhysicalPosition::new(x as i32, 40));
                 }
                 // Make overlay ignore mouse events (click-through)
                 let _ = overlay.set_ignore_cursor_events(true);
