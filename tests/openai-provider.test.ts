@@ -4,8 +4,11 @@ import { openaiProvider } from "../src/stt/providers/openai";
 const originalFetch = globalThis.fetch;
 
 describe("openai provider", () => {
+  let requestedTranscriptionModels: string[] = [];
+
   beforeEach(() => {
-    globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestedTranscriptionModels = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
       if (url.endsWith("/models")) {
@@ -22,6 +25,14 @@ describe("openai provider", () => {
       }
 
       if (url.endsWith("/audio/transcriptions")) {
+        const form = init?.body;
+        if (form instanceof FormData) {
+          const modelValue = form.get("model");
+          if (typeof modelValue === "string") {
+            requestedTranscriptionModels.push(modelValue);
+          }
+        }
+
         return new Response(JSON.stringify({ text: "hello goblin" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -52,6 +63,7 @@ describe("openai provider", () => {
       "gpt-4o-mini-transcribe"
     );
     expect(transcript).toBe("hello goblin");
+    expect(requestedTranscriptionModels).toEqual(["gpt-4o-mini-transcribe"]);
   });
 
   test("live pipeline returns text", async () => {
@@ -64,5 +76,17 @@ describe("openai provider", () => {
     });
 
     expect(transcript).toBe("hello goblin");
+    expect(requestedTranscriptionModels).toEqual(["gpt-4o-mini-transcribe"]);
+  });
+
+  test("live pipeline fails when model is missing", async () => {
+    await expect(
+      openaiProvider.transcribeWithLivePipeline({
+        apiKey: "test-key",
+        pcmChunksBase64: ["AAAA"],
+        settleDelayMs: 0,
+        chunkIntervalMs: 0,
+      })
+    ).rejects.toThrow("No model selected");
   });
 });

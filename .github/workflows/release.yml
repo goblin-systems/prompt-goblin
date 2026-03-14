@@ -124,7 +124,7 @@ jobs:
     needs: prepare
     runs-on: ${{ matrix.os }}
     env:
-      CARGO_TARGET_DIR: src-tauri/target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
     strategy:
       fail-fast: false
       matrix:
