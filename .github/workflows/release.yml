@@ -24,6 +24,8 @@ jobs:
   prepare:
     name: Prepare release version
     runs-on: ubuntu-latest
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       new_tag: ${{ steps.version.outputs.new_tag }}
@@ -44,9 +46,7 @@ jobs:
         run: bun run test:unit
 
       - name: Run integration tests
-        if: ${{ secrets.GEMINI_API_KEY != '' }}
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        if: ${{ env.GEMINI_API_KEY != '' }}
         run: bun run test:integration
 
       - name: Determine next version
