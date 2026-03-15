@@ -134,13 +134,45 @@
             <canvas id="mic-wave-canvas" height="64"></canvas>
           </div>
           <div class="mic-test-controls">
-            <button id="mic-test-btn" class="secondary-btn" type="button">Start mic test</button>
+            <button id="mic-test-btn" class="secondary-btn" type="button">Start 5s test</button>
+            <button id="continuous-mic-test-btn" class="secondary-btn" type="button">
+              Start continuous test
+            </button>
+            <button
+              id="wave-style-btn"
+              class="icon-btn mic-tool-btn"
+              type="button"
+              aria-label="Change waveform style"
+              title="Change waveform style"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M2 14c2 0 2-6 4-6s2 10 4 10 2-14 4-14 2 8 4 8 2-4 4-4" />
+              </svg>
+            </button>
+            <button
+              id="wave-color-btn"
+              class="icon-btn mic-tool-btn"
+              type="button"
+              aria-label="Change waveform color scheme"
+              title="Change waveform color scheme"
+              hidden
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="6" cy="12" r="2.5" />
+                <circle cx="12" cy="8" r="2.5" />
+                <circle cx="18" cy="12" r="2.5" />
+                <path d="M7.8 13.6 10.2 9.9" />
+                <path d="M13.8 9.9 16.2 13.6" />
+              </svg>
+            </button>
             <span id="mic-test-status" class="hint">Idle</span>
             <span id="mic-signal-indicator" class="status-indicator disconnected">
               <span class="status-dot"></span>
               <span class="status-text">No signal</span>
             </span>
           </div>
+          <p class="hint">Use the 5-second test for a quick check, or continuous test to listen until you stop it.</p>
           <p id="mic-test-transcript" class="hint mic-test-transcript">Transcript: -</p>
         </div>
       </section>
@@ -223,8 +255,9 @@
         <button id="reset-defaults-btn" class="secondary-btn" type="button">
           Reset to defaults
         </button>
-        <span id="save-status" class="save-status"></span>
       </footer>
+
+      <div id="app-toast" class="app-toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <div class="settings-brand-art" aria-hidden="true">
         <img src="/settings-goblin-transparent.png" alt="" class="settings-brand-image" />

@@ -59,6 +59,26 @@ function extractApiErrorMessage(body: string): string {
   }
 }
 
+/**
+ * Joins committed transcript segments with proper spacing.
+ * Handles the simple case of concatenating finalized turn texts.
+ */
+function joinTranscriptSegments(committed: string, pending: string): string {
+  const left = committed.trimEnd();
+  const right = pending.trim();
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return `${left} ${right}`;
+}
+
+function formatChunkTextForLog(text: string): string {
+  return JSON.stringify(text);
+}
+
 export async function fetchLiveModels(apiKey: string): Promise<string[]> {
   if (!apiKey) {
     throw new Error("API key not configured");
@@ -160,7 +180,11 @@ export async function probeLiveModelForTranscription(
 
   const ai = new GoogleGenAI({ apiKey });
   const responseModality = getResponseModalityForModel(normalized);
-  let session: Session | null = null;
+
+  // Track the connect promise so we can always clean up the session,
+  // even if it resolves after the probe timeout fires.
+  let sessionPromise: Promise<Session> | null = null;
+  let probeError: Error | null = null;
 
   debugLog(
     `Starting live probe for model '${normalized}' (responseModality='${responseModality}')`,
@@ -190,83 +214,90 @@ export async function probeLiveModelForTranscription(
       finishResolve();
     }, timeoutMs);
 
-    ai.live
-      .connect({
-        model: normalized,
-        config: {
-          responseModalities: [responseModality],
-          inputAudioTranscription: {},
+    sessionPromise = ai.live.connect({
+      model: normalized,
+      config: {
+        responseModalities: [responseModality],
+        inputAudioTranscription: {},
+      },
+      callbacks: {
+        onmessage: () => {
+          // no-op; required for some SDK audio callback paths
         },
-        callbacks: {
-          onmessage: () => {
-            // no-op; required for some SDK audio callback paths
-          },
-          onopen: () => {
-            setTimeout(() => {
-              session?.sendRealtimeInput({
-                media: {
-                  data: "AAAA",
-                  mimeType: "audio/pcm;rate=16000",
-                },
-              });
-            }, 0);
+        onopen: () => {
+          setTimeout(() => {
+            // Session is available synchronously after connect resolves,
+            // but onopen fires via the WebSocket so session may not be
+            // assigned yet. We use sessionPromise in cleanup instead.
+          }, 0);
 
-            setTimeout(() => {
-              finishResolve();
-            }, 300);
-          },
-          onerror: (event: Event) => {
-            const err = event as ErrorEvent;
+          setTimeout(() => {
+            finishResolve();
+          }, 300);
+        },
+        onerror: (event: Event) => {
+          const err = event as ErrorEvent;
+          clearTimeout(timeout);
+          finishReject(
+            `Live probe error for model '${normalized}': ${
+              err.message || "Connection error"
+            }`
+          );
+        },
+        onclose: (event?: unknown) => {
+          const code =
+            event && typeof event === "object" && typeof (event as { code?: unknown }).code === "number"
+              ? ((event as { code: number }).code as number)
+              : null;
+          const reason =
+            event && typeof event === "object" && typeof (event as { reason?: unknown }).reason === "string"
+              ? ((event as { reason: string }).reason as string)
+              : "";
+
+          if (code === 1007 || code === 1008) {
             clearTimeout(timeout);
             finishReject(
-              `Live probe error for model '${normalized}': ${
-                err.message || "Connection error"
+              `Live probe rejected model '${normalized}' with code=${code}${
+                reason ? ` reason=${reason}` : ""
               }`
             );
-          },
-          onclose: (event?: unknown) => {
-            const code =
-              event && typeof event === "object" && typeof (event as { code?: unknown }).code === "number"
-                ? ((event as { code: number }).code as number)
-                : null;
-            const reason =
-              event && typeof event === "object" && typeof (event as { reason?: unknown }).reason === "string"
-                ? ((event as { reason: string }).reason as string)
-                : "";
+            return;
+          }
 
-            if (code === 1007 || code === 1008) {
-              clearTimeout(timeout);
-              finishReject(
-                `Live probe rejected model '${normalized}' with code=${code}${
-                  reason ? ` reason=${reason}` : ""
-                }`
-              );
-              return;
-            }
-
-            finishResolve();
-          },
+          finishResolve();
         },
-      })
-      .then((s) => {
-        session = s;
-      })
-      .catch((err) => {
-        clearTimeout(timeout);
-        finishReject(
-          `Live probe failed to connect for model '${normalized}': ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      });
+      },
+    });
+
+    sessionPromise.catch((err) => {
+      clearTimeout(timeout);
+      finishReject(
+        `Live probe failed to connect for model '${normalized}': ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    });
+  }).catch((err) => {
+    probeError = err instanceof Error ? err : new Error(String(err));
   });
 
-  try {
-    if (session) {
-      (session as unknown as { close: () => void }).close();
+  // Always await the session promise to ensure cleanup,
+  // even if the probe timed out or errored before it resolved.
+  if (sessionPromise) {
+    try {
+      const session = await sessionPromise;
+      try {
+        (session as unknown as { close: () => void }).close();
+      } catch {
+        // ignore close errors in probe cleanup
+      }
+    } catch {
+      // connect itself failed — nothing to close
     }
-  } catch {
-    // ignore close errors in probe cleanup
+  }
+
+  if (probeError) {
+    throw probeError;
   }
 
   debugLog(`Live probe passed for model '${normalized}'`, "INFO");
@@ -282,7 +313,17 @@ export class GeminiTranscriber {
   private activeLiveModel = "";
   private onTranscript: TranscriptCallback | null = null;
   private onStatus: StatusCallback | null = null;
-  private currentTranscript = "";
+
+  // Per-turn transcript state machine:
+  // committedTranscript: finalized text from all completed turns
+  // pendingInputTranscription: latest cumulative inputTranscription for the current turn (replaced on each update)
+  // pendingModelText: accumulated model text tokens for the current turn (direct concatenation, fallback only)
+  // hasReceivedInputTranscription: tracks whether inputTranscription has been received in this session
+  private committedTranscript = "";
+  private pendingInputTranscription = "";
+  private pendingModelText = "";
+  private hasReceivedInputTranscription = false;
+
   private connectStartedAt = 0;
   private messageCount = 0;
   private inputTranscriptionChunkCount = 0;
@@ -291,12 +332,15 @@ export class GeminiTranscriber {
   private sentAudioApproxBytes = 0;
   private lastAudioSendLogChunk = 0;
   private droppedAudioChunkCount = 0;
+  private consecutiveSendFailures = 0;
+  private static readonly SEND_FAILURE_ESCALATION_THRESHOLD = 3;
   private turnCompleteCount = 0;
   private interruptedCount = 0;
   private generationCompleteCount = 0;
   private pendingAudioChunks: string[] = [];
   private queuedAudioApproxBytes = 0;
   private droppedQueuedAudioChunks = 0;
+  private turnSettleResolvers: Array<() => void> = [];
 
   private static readonly MAX_PENDING_AUDIO_CHUNKS = 1200;
 
@@ -371,8 +415,11 @@ export class GeminiTranscriber {
 
     this.onStatus?.("connecting");
     if (!preserveTranscript) {
-      this.currentTranscript = "";
+      this.committedTranscript = "";
+      this.pendingInputTranscription = "";
+      this.pendingModelText = "";
     }
+    this.hasReceivedInputTranscription = false;
     this.connectStartedAt = Date.now();
     this.messageCount = 0;
     this.inputTranscriptionChunkCount = 0;
@@ -381,6 +428,7 @@ export class GeminiTranscriber {
     this.sentAudioApproxBytes = 0;
     this.lastAudioSendLogChunk = 0;
     this.droppedAudioChunkCount = 0;
+    this.consecutiveSendFailures = 0;
     this.turnCompleteCount = 0;
     this.interruptedCount = 0;
     this.generationCompleteCount = 0;
@@ -500,7 +548,7 @@ export class GeminiTranscriber {
       if (serverContent.interrupted === true) {
         this.interruptedCount += 1;
         debugLog(
-          `Gemini lifecycle: interrupted #${this.interruptedCount} (message=${this.messageCount}, transcriptChars=${this.currentTranscript.length})`,
+          `Gemini lifecycle: interrupted #${this.interruptedCount} (message=${this.messageCount}, transcriptChars=${this.computeFullTranscript().length})`,
           "WARN"
         );
       }
@@ -508,51 +556,87 @@ export class GeminiTranscriber {
       if (serverContent.generationComplete === true) {
         this.generationCompleteCount += 1;
         debugLog(
-          `Gemini lifecycle: generationComplete #${this.generationCompleteCount} (message=${this.messageCount}, transcriptChars=${this.currentTranscript.length})`,
+          `Gemini lifecycle: generationComplete #${this.generationCompleteCount} (message=${this.messageCount}, transcriptChars=${this.computeFullTranscript().length})`,
           "INFO"
         );
       }
 
       if (isDebugLoggingEnabled() && serverContent.modelTurn !== undefined) {
         debugLog(
-          `Gemini lifecycle: modelTurn event (message=${this.messageCount}, transcriptChars=${this.currentTranscript.length})`,
+          `Gemini lifecycle: modelTurn event (message=${this.messageCount}, transcriptChars=${this.computeFullTranscript().length})`,
           "INFO"
         );
       }
     }
 
-    if (message.serverContent?.inputTranscription?.text) {
-      const text = message.serverContent.inputTranscription.text;
+    // PRIMARY PATH: Server-side ASR via inputTranscription.
+    // Chunks are incremental token-level deltas (BPE fragments) with embedded
+    // spacing (leading spaces mark word boundaries). They must be concatenated
+    // directly — no extra spaces should be inserted.
+    const inputTranscription = message.serverContent?.inputTranscription as
+      | { text?: string; finished?: boolean }
+      | undefined;
+    if (inputTranscription?.text) {
+      const text = inputTranscription.text;
       this.inputTranscriptionChunkCount += 1;
-      this.currentTranscript += text;
+      this.hasReceivedInputTranscription = true;
+      this.pendingInputTranscription += text;
+
       if (isDebugLoggingEnabled()) {
         debugLog(
-          `Gemini input transcription chunk #${this.inputTranscriptionChunkCount}: +${text.length} chars (total ${this.currentTranscript.length})`,
+          `Gemini input transcription chunk #${this.inputTranscriptionChunkCount}: text=${formatChunkTextForLog(text)} (${text.length} chars, pending=${this.pendingInputTranscription.length}, committed=${this.committedTranscript.length})`,
           "INFO"
         );
       }
-      this.onTranscript?.(this.currentTranscript, false);
+
+      // If this transcription segment is finished, commit it
+      if (inputTranscription.finished === true) {
+        if (isDebugLoggingEnabled()) {
+          debugLog(
+            `Gemini input transcription finished (committing pending: ${this.pendingInputTranscription.length} chars)`,
+            "INFO"
+          );
+        }
+        this.commitPendingTurn();
+      }
+
+      this.onTranscript?.(this.computeFullTranscript(), false);
     }
 
-    if (message.text) {
+    // FALLBACK PATH: Model text output (serverContent.modelTurn.parts[].text).
+    // Only used when inputTranscription hasn't been received for this session.
+    // Tokens are concatenated directly (no space insertion) since they arrive
+    // as subword BPE fragments.
+    if (message.text && !this.hasReceivedInputTranscription) {
       this.modelTextChunkCount += 1;
-      this.currentTranscript += message.text;
+      this.pendingModelText += message.text;
+
       if (isDebugLoggingEnabled()) {
         debugLog(
-          `Gemini model text chunk #${this.modelTextChunkCount}: +${message.text.length} chars (total ${this.currentTranscript.length})`,
+          `Gemini model text chunk #${this.modelTextChunkCount}: text=${formatChunkTextForLog(message.text)} (+${message.text.length} chars, pendingModel=${this.pendingModelText.length}, committed=${this.committedTranscript.length})`,
           "INFO"
         );
       }
-      this.onTranscript?.(this.currentTranscript, false);
+      this.onTranscript?.(this.computeFullTranscript(), false);
+    } else if (message.text && this.hasReceivedInputTranscription) {
+      // Still count model text chunks for diagnostics, but don't use them
+      this.modelTextChunkCount += 1;
+      if (isDebugLoggingEnabled()) {
+        debugLog(
+          `Gemini model text chunk #${this.modelTextChunkCount} (ignored, using inputTranscription): text=${formatChunkTextForLog(message.text)}`,
+          "INFO"
+        );
+      }
     }
 
     if (message.serverContent?.turnComplete) {
       this.turnCompleteCount += 1;
       debugLog(
-        `Gemini turn complete #${this.turnCompleteCount} (transcriptChars=${this.currentTranscript.length}, message=${this.messageCount})`,
+        `Gemini turn complete #${this.turnCompleteCount} (transcriptChars=${this.computeFullTranscript().length}, message=${this.messageCount})`,
         "INFO"
       );
-      this.onTranscript?.(this.currentTranscript, true);
+      this.commitPendingTurn();
+      this.onTranscript?.(this.computeFullTranscript(), true);
     }
   }
 
@@ -592,9 +676,27 @@ export class GeminiTranscriber {
         },
       });
       this.droppedAudioChunkCount = 0;
+      this.consecutiveSendFailures = 0;
     } catch (err) {
+      this.consecutiveSendFailures += 1;
       console.error("Failed to send audio:", err);
-      debugLog(`Failed to send audio to Gemini: ${String(err)}`, "ERROR");
+      debugLog(
+        `Failed to send audio to Gemini (consecutive=${this.consecutiveSendFailures}): ${String(err)}`,
+        "ERROR"
+      );
+
+      if (
+        this.consecutiveSendFailures >=
+        GeminiTranscriber.SEND_FAILURE_ESCALATION_THRESHOLD
+      ) {
+        debugLog(
+          `Send failure escalation: ${this.consecutiveSendFailures} consecutive failures, clearing session`,
+          "ERROR"
+        );
+        this.session = null;
+        this.consecutiveSendFailures = 0;
+        this.onStatus?.("error", "Audio send failed repeatedly — connection lost");
+      }
     }
   }
 
@@ -656,7 +758,7 @@ export class GeminiTranscriber {
         audioStreamEnd: true,
       });
       debugLog(
-        `Sent Gemini audio stream boundary (reason='${reason}', sentAudioChunks=${this.sentAudioChunkCount}, transcriptChars=${this.currentTranscript.length})`,
+        `Sent Gemini audio stream boundary (reason='${reason}', sentAudioChunks=${this.sentAudioChunkCount}, transcriptChars=${this.computeFullTranscript().length})`,
         "INFO"
       );
       return true;
@@ -671,7 +773,7 @@ export class GeminiTranscriber {
 
   async reconnectForRecovery(): Promise<void> {
     debugLog(
-      `Starting Gemini live recovery reconnect (queuedAudio=${this.pendingAudioChunks.length}, transcriptChars=${this.currentTranscript.length})`,
+      `Starting Gemini live recovery reconnect (queuedAudio=${this.pendingAudioChunks.length}, transcriptChars=${this.computeFullTranscript().length})`,
       "WARN"
     );
     await this.disconnect();
@@ -683,11 +785,74 @@ export class GeminiTranscriber {
   }
 
   getTranscript(): string {
-    return this.currentTranscript;
+    return this.computeFullTranscript();
   }
 
   resetTranscript() {
-    this.currentTranscript = "";
+    this.committedTranscript = "";
+    this.pendingInputTranscription = "";
+    this.pendingModelText = "";
+    this.hasReceivedInputTranscription = false;
+  }
+
+  /**
+   * Returns a promise that resolves when the current pending turn is committed
+   * (via turnComplete or inputTranscription.finished), or when the timeout
+   * expires — whichever comes first. If there is no pending text, resolves
+   * immediately.
+   */
+  waitForPendingTurnSettle(timeoutMs = 1500): Promise<void> {
+    const hasPending = this.pendingInputTranscription.trim().length > 0 ||
+      this.pendingModelText.trim().length > 0;
+    if (!hasPending || !this.session) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        const idx = this.turnSettleResolvers.indexOf(onSettle);
+        if (idx !== -1) this.turnSettleResolvers.splice(idx, 1);
+        resolve();
+      };
+      const onSettle = finish;
+      this.turnSettleResolvers.push(onSettle);
+      setTimeout(finish, timeoutMs);
+    });
+  }
+
+  /**
+   * Computes the full transcript from committed text + current pending turn.
+   * Prefers inputTranscription over model text when available.
+   */
+  private computeFullTranscript(): string {
+    const pending = this.hasReceivedInputTranscription
+      ? this.pendingInputTranscription
+      : this.pendingModelText;
+    return joinTranscriptSegments(this.committedTranscript, pending);
+  }
+
+  /**
+   * Commits the current pending turn text to the committed transcript
+   * and resets the pending state for the next turn.
+   */
+  private commitPendingTurn() {
+    const pending = this.hasReceivedInputTranscription
+      ? this.pendingInputTranscription
+      : this.pendingModelText;
+    if (pending.trim()) {
+      this.committedTranscript = joinTranscriptSegments(this.committedTranscript, pending);
+    }
+    this.pendingInputTranscription = "";
+    this.pendingModelText = "";
+
+    // Notify any waiters that the turn has settled
+    const resolvers = this.turnSettleResolvers.splice(0);
+    for (const resolve of resolvers) {
+      resolve();
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -885,9 +1050,20 @@ export async function transcribeWithLivePipeline(options: {
 
   try {
     await liveTranscriber.connect();
+
+    // Wait for connected status with a timeout.
+    // Use a flag to prevent the timeout branch from throwing
+    // an unhandled rejection after the race settles.
+    let raceSettled = false;
     await Promise.race([
-      connectedPromise,
+      connectedPromise.then(() => {
+        raceSettled = true;
+      }),
       sleep(2500).then(() => {
+        if (raceSettled) {
+          return; // connectedPromise already won the race
+        }
+        raceSettled = true;
         if (!isConnected) {
           throw new Error(statusMessage || "Live transcription connection timed out");
         }

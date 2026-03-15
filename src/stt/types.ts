@@ -36,6 +36,7 @@ export interface LiveTranscriber {
   getTranscript(): string;
   resetTranscript(): void;
   getActiveModel(): string;
+  waitForPendingTurnSettle(timeoutMs?: number): Promise<void>;
 }
 
 export interface SttProviderRuntime {

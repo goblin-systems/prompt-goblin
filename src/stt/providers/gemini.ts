@@ -67,6 +67,10 @@ class GeminiProviderTranscriber implements LiveTranscriber {
   getActiveModel(): string {
     return this.inner.getActiveLiveModel();
   }
+
+  waitForPendingTurnSettle(timeoutMs?: number): Promise<void> {
+    return this.inner.waitForPendingTurnSettle(timeoutMs);
+  }
 }
 
 export const geminiProvider: SttProviderRuntime = {

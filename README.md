@@ -1,16 +1,35 @@
 # Prompt Goblin
 
-Voice-to-text desktop app with pluggable providers (Gemini + OpenAI), built with Tauri + Vanilla TypeScript.
-> Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking" in this establishment.
+<table>
+  <tr>
+    <td width="120" valign="top">
+      <img src="public/settings-goblin-transparent.png" alt="Prompt Goblin icon" width="120" />
+    </td>
+    <td valign="top">
+      Voice-to-text desktop app with pluggable providers (Gemini + OpenAI), built with Tauri + Vanilla TypeScript.<br /><br />
+      <em>Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking" in this establishment.</em>
+    </td>
+  </tr>
+</table>
 
 ## Disclaimer
 
 This project was created with an AI coding agent.
-Development was done using OpenCode with a mixture of models, predominantly GPT-5.3 Codex and Claude Opus 4.6.
+Development was done using OpenCode with a mixture of models, predominantly GPT-5.3 Codex, GPT-5.4 Codex and Claude Opus 4.6.
+
+## Features
+
+- Global hotkey recording with live voice transcription (`Alt+G` by default)
+- Pluggable STT providers with Gemini and OpenAI support
+- Provider/model selection with per-provider API keys
+- Cached model lists with refresh, fallback selection, and last-known-good tracking
+- Auto-stop on silence with configurable timeout
+- Typing modes: incremental streaming or all-at-once on stop
+- Mic test tools: quick 5-second test, continuous live test, transcript preview, and playback
 
 ## STT Models
 
-Gemini 2.5 Flash Native Audio Preview 12-2025 is currently the model that performs bests.
+Gemini 2.5 Flash Native Audio Preview 12-2025 is currently the model that performs best.
 
 ## Prerequisites
 
@@ -48,9 +67,11 @@ bun run tauri build
 
 ## Output
 
-On Windows, the installer is generated at:
+Build artifacts are generated under:
 
-`src-tauri/target/release/bundle/nsis/`
+`src-tauri/target/release/bundle/`
+
+Release packaging currently targets Windows, macOS, and Linux desktop bundles.
 
 ## Contribution Guide
 

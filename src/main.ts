@@ -35,13 +35,21 @@ import {
   type ConnectionStatus,
   type MainDom,
 } from "./main/dom";
-import { wavToPcmChunksBase64 } from "./main/audio";
+import { LiveAudioSession } from "./live-audio-session";
 import {
   MODEL_CACHE_TTL_MS,
   isModelCacheFresh,
   selectPreferredModel,
 } from "./main/model-cache";
 import { base64ToBytes, fingerprintApiKey, normalizeHotkey } from "./main/utils";
+import {
+  createWaveProgressGradient,
+  cycleWaveformColorScheme,
+  cycleWaveformStyle,
+  drawWaveform,
+  getWaveformColorSchemeLabel,
+  getWaveformStyleLabel,
+} from "./waveform-styles";
 
 // ── DOM Elements ────────────────────────────────────────────
 
@@ -56,6 +64,9 @@ let recordingLoudnessInput: HTMLInputElement;
 let recordingLoudnessValue: HTMLElement;
 let refreshMicrophonesBtn: HTMLButtonElement;
 let micTestBtn: HTMLButtonElement;
+let continuousMicTestBtn: HTMLButtonElement;
+let waveStyleBtn: HTMLButtonElement;
+let waveColorBtn: HTMLButtonElement;
 let micTestStatus: HTMLElement;
 let micTestTranscript: HTMLElement;
 let micSignalIndicator: HTMLElement;
@@ -76,7 +87,7 @@ let silenceTimeoutField: HTMLElement;
 let silenceTimeoutInput: HTMLInputElement;
 let languageSelect: HTMLSelectElement;
 let resetDefaultsBtn: HTMLButtonElement;
-let saveStatus: HTMLElement;
+let appToast: HTMLElement;
 let windowMinimizeBtn: HTMLButtonElement | null;
 let windowCloseBtn: HTMLButtonElement;
 let dom: MainDom;
@@ -94,10 +105,13 @@ let micTestActive = false;
 let micTestStartedAt = 0;
 let micTestAutoStopTimer: number | null = null;
 let micTestStopInProgress = false;
+let currentMicTestMode: "timed" | "continuous" | null = null;
+let micTestSession: LiveAudioSession<string | null> | null = null;
 let targetMicLevel = 0;
 let displayedMicLevel = 0;
 let micPhase = 0;
 let micWaveRaf = 0;
+let micTestPlaybackActive = false;
 let lastMicTestPlaybackUrl: string | null = null;
 let lastMicTestAudio: HTMLAudioElement | null = null;
 const MIC_ACTIVITY_RMS_THRESHOLD = 0.01;
@@ -131,6 +145,12 @@ let autosaveTimer: number | null = null;
 let saveStatusTimer: number | null = null;
 let saveInFlight = false;
 let savePending = false;
+let nextAutosaveStatus:
+  | {
+      message: string;
+      durationMs?: number;
+    }
+  | null = null;
 
 window.addEventListener("contextmenu", (event) => {
   event.preventDefault();
@@ -156,6 +176,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     recordingLoudnessValue,
     refreshMicrophonesBtn,
     micTestBtn,
+    continuousMicTestBtn,
+    waveStyleBtn,
+    waveColorBtn,
     micTestStatus,
     micTestTranscript,
     micSignalIndicator,
@@ -176,7 +199,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     silenceTimeoutInput,
     languageSelect,
     resetDefaultsBtn,
-    saveStatus,
+    appToast,
     windowMinimizeBtn,
     windowCloseBtn,
   } = dom);
@@ -225,7 +248,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const receivingAudio = rms >= MIC_ACTIVITY_RMS_THRESHOLD;
     targetMicLevel = receivingAudio ? Math.min(1, rms * 14) : 0;
     if (micTestActive) {
-      micTestStatus.textContent = receivingAudio ? "Receiving audio" : "Listening...";
+      micTestStatus.textContent = receivingAudio
+        ? "Receiving audio"
+        : currentMicTestMode === "continuous"
+          ? "Listening until stopped..."
+          : "Listening...";
       setMicSignalState(receivingAudio, true);
     }
   });
@@ -236,13 +263,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       clearMicTestAutoStop();
       micTestStartedAt = 0;
       targetMicLevel = 0;
-      micTestStatus.textContent = "Idle";
+      if (!micTestStopInProgress) {
+        currentMicTestMode = null;
+        micTestStatus.textContent = "Idle";
+      }
       setMicSignalState(false, false);
     } else {
       if (!micTestStartedAt) {
         micTestStartedAt = Date.now();
       }
-      micTestStatus.textContent = "Listening...";
+      micTestStatus.textContent =
+        currentMicTestMode === "continuous" ? "Listening until stopped..." : "Listening...";
       setMicSignalState(false, true);
     }
     updateMicTestButton();
@@ -263,6 +294,17 @@ window.addEventListener("DOMContentLoaded", async () => {
 function populateUI(settings: Settings) {
   renderUI(dom, settings);
   updateRecordingLoudnessValue();
+  updateWaveToolButtons();
+}
+
+function updateWaveToolButtons() {
+  const unlocked = currentSettings.waveformEasterEggUnlocked;
+  waveStyleBtn.hidden = !unlocked;
+  waveColorBtn.hidden = !unlocked;
+  waveStyleBtn.title = `Wave style: ${getWaveformStyleLabel(currentSettings.waveformStyle)}`;
+  waveStyleBtn.setAttribute("aria-label", waveStyleBtn.title);
+  waveColorBtn.title = `Wave colors: ${getWaveformColorSchemeLabel(currentSettings.waveformColorScheme)}`;
+  waveColorBtn.setAttribute("aria-label", waveColorBtn.title);
 }
 
 function setupEventListeners() {
@@ -411,17 +453,63 @@ function setupEventListeners() {
   });
 
   micTestBtn.addEventListener("click", async () => {
-    if (micTestActive) {
+    if (micTestActive && currentMicTestMode === "timed") {
       await stopMicTest();
-    } else {
-      await startMicTest();
+      return;
     }
+
+    if (!micTestActive) {
+      await startMicTest("timed");
+    }
+  });
+
+  continuousMicTestBtn.addEventListener("click", async () => {
+    if (micTestActive && currentMicTestMode === "continuous") {
+      await stopMicTest();
+      return;
+    }
+
+    if (!micTestActive) {
+      await startMicTest("continuous");
+    }
+  });
+
+  micWaveCanvas.addEventListener("click", () => {
+    const isFirstUnlock = !currentSettings.waveformEasterEggUnlocked;
+    if (isFirstUnlock) {
+      currentSettings.waveformEasterEggUnlocked = true;
+      nextAutosaveStatus = {
+        message: "Goblin: Well look at that—clever little snooper!",
+        durationMs: 2600,
+      };
+      updateWaveToolButtons();
+    }
+    currentSettings.waveformStyle = cycleWaveformStyle(currentSettings.waveformStyle);
+    updateWaveToolButtons();
+    scheduleAutosave(0);
+  });
+
+  waveStyleBtn.addEventListener("click", () => {
+    currentSettings.waveformStyle = cycleWaveformStyle(currentSettings.waveformStyle);
+    updateWaveToolButtons();
+    scheduleAutosave(0);
+  });
+
+  waveColorBtn.addEventListener("click", () => {
+    currentSettings.waveformColorScheme = cycleWaveformColorScheme(
+      currentSettings.waveformColorScheme
+    );
+    updateWaveToolButtons();
+    scheduleAutosave(0);
   });
 
   microphoneSelect.addEventListener("change", async () => {
     if (micTestActive) {
+      const activeMode = currentMicTestMode;
       await stopMicTest();
-      await startMicTest();
+      if (activeMode) {
+        await startMicTest(activeMode);
+      }
     }
     scheduleAutosave(0);
   });
@@ -532,7 +620,15 @@ async function refreshLiveModelList(forceApiRefresh: boolean) {
 }
 
 function updateMicTestButton() {
-  micTestBtn.textContent = micTestActive ? "Stop mic test" : "Start mic test";
+  const timedActive = micTestActive && currentMicTestMode === "timed";
+  const continuousActive = micTestActive && currentMicTestMode === "continuous";
+
+  micTestBtn.textContent = timedActive ? "Stop 5s test" : "Start 5s test";
+  continuousMicTestBtn.textContent = continuousActive
+    ? "Stop continuous test"
+    : "Start continuous test";
+  micTestBtn.disabled = continuousActive || micTestStopInProgress;
+  continuousMicTestBtn.disabled = timedActive || micTestStopInProgress;
 }
 
 function clearMicTestAutoStop() {
@@ -561,30 +657,106 @@ function setMicSignalState(isSignalDetected: boolean, isListening: boolean) {
   }
 }
 
-async function startMicTest() {
+async function startMicTest(mode: "timed" | "continuous") {
+  const provider = getActiveProvider();
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    micTestStatus.textContent = `${getActiveProviderLabel()} API key required`;
+    micTestTranscript.textContent = "Transcript: -";
+    setMicSignalState(false, false);
+    return;
+  }
+
+  const effectiveTypingMode = mode === "timed" ? "all_at_once" : "incremental";
+  const micTestSettings: Settings = {
+    ...currentSettings,
+    typingMode: effectiveTypingMode,
+    sttProvider: provider,
+  };
+
+  const session = new LiveAudioSession<string | null>({
+    provider,
+    apiKey,
+    language: languageSelect.value || "auto",
+    preferredModel: liveModelSelect.value || currentSettings.providers[provider].selectedModel,
+    fallbackModels: currentSettings.providers[provider].modelCache?.models ?? [],
+    typingMode: effectiveTypingMode,
+    enableTyping: false,
+    textCommandSettings: micTestSettings,
+    audioEventName: "mic-test-audio-chunk",
+    startCommand: "start_mic_monitoring",
+    startPayload: {
+      deviceId: microphoneSelect.value || "default",
+      inputGain: getRecordingInputGain(),
+      captureLimitSeconds: mode === "timed" ? MIC_TEST_DURATION_MS / 1000 : null,
+    },
+    stopCommand: "stop_mic_monitoring_with_recording",
+    onTranscript: ({ displayText, isFinal }) => {
+      if (mode === "timed" && !isFinal) {
+        return;
+      }
+
+      if (displayText) {
+        micTestTranscript.textContent = `Transcript: ${displayText}`;
+      } else if (isFinal) {
+        micTestTranscript.textContent = "Transcript: (No speech detected)";
+      }
+    },
+    onStatus: (status, message) => {
+      if (!micTestActive || micTestStopInProgress) {
+        return;
+      }
+
+      if (status === "connecting") {
+        micTestStatus.textContent = "Connecting...";
+      } else if (status === "connected") {
+        micTestStatus.textContent =
+          currentMicTestMode === "continuous" ? "Listening until stopped..." : "Listening...";
+      } else if (status === "error") {
+        micTestStatus.textContent = message ? `Error: ${message}` : "Transcription error";
+      } else if (status === "disconnected") {
+        micTestStatus.textContent = message ? `Disconnected: ${message}` : "Disconnected";
+      }
+    },
+  });
+
   try {
     clearMicTestAutoStop();
     cleanupMicTestPlayback();
-    await invoke("start_mic_monitoring", {
-      deviceId: microphoneSelect.value || "default",
-      inputGain: getRecordingInputGain(),
-    });
     micTestActive = true;
+    currentMicTestMode = mode;
+    micTestSession = session;
     micTestStartedAt = Date.now();
-    micTestStatus.textContent = "Listening...";
-    micTestTranscript.textContent = "Transcript: Listening...";
+    micTestStatus.textContent = "Connecting...";
+    micTestTranscript.textContent =
+      mode === "timed"
+        ? "Transcript: Waiting for final transcript..."
+        : "Transcript: Listening for live transcript...";
     setMicSignalState(false, true);
-    micTestAutoStopTimer = window.setTimeout(() => {
-      if (micTestActive) {
-        void stopMicTest();
-      }
-    }, MIC_TEST_DURATION_MS);
     updateMicTestButton();
+
+    await session.start();
+    debugLog(
+      `Mic test started with ${getProviderLabel(provider)} model '${session.getActiveModel()}' in ${effectiveTypingMode} mode`,
+      "INFO"
+    );
+
+    if (mode === "timed") {
+      micTestAutoStopTimer = window.setTimeout(() => {
+        if (micTestActive && currentMicTestMode === "timed") {
+          void stopMicTest();
+        }
+      }, MIC_TEST_DURATION_MS);
+    }
   } catch (err) {
     console.error("Failed to start mic test:", err);
+    micTestSession = null;
+    micTestActive = false;
+    currentMicTestMode = null;
     micTestStatus.textContent = "Mic test failed";
     micTestTranscript.textContent = "Transcript: -";
     setMicSignalState(false, false);
+    updateMicTestButton();
   }
 }
 
@@ -596,34 +768,44 @@ async function stopMicTest() {
   micTestStopInProgress = true;
   clearMicTestAutoStop();
 
+  const session = micTestSession;
   let recordedWavBase64: string | null = null;
+  let finalTranscript = "";
   try {
-    recordedWavBase64 = await invoke<string | null>(
-      "stop_mic_monitoring_with_recording"
-    );
+    if (session) {
+      micTestStatus.textContent = "Finalizing transcript...";
+      const result = await session.stop();
+      recordedWavBase64 = result.captureResult;
+      finalTranscript = result.finalText;
+    }
   } catch (err) {
     console.error("Failed to stop mic test:", err);
   } finally {
+    micTestSession = null;
     micTestActive = false;
+    currentMicTestMode = null;
     micTestStartedAt = 0;
     targetMicLevel = 0;
     micTestStatus.textContent = "Idle";
     setMicSignalState(false, false);
-    updateMicTestButton();
     micTestStopInProgress = false;
+    updateMicTestButton();
   }
 
   if (!recordedWavBase64) {
     micTestStatus.textContent = "No audio captured";
-    micTestTranscript.textContent = "Transcript: No audio captured";
+    micTestTranscript.textContent = finalTranscript
+      ? `Transcript: ${finalTranscript}`
+      : "Transcript: No audio captured";
     return;
   }
 
-  micTestStatus.textContent = "Transcribing...";
-  const transcript = await transcribeMicTestRecording(recordedWavBase64);
-  if (transcript) {
-    debugLog(`Mic test transcript preview: "${transcript.slice(0, 140)}${transcript.length > 140 ? "..." : ""}"`, "INFO");
-    micTestTranscript.textContent = `Transcript: ${transcript}`;
+  if (finalTranscript) {
+    debugLog(
+      `Mic test transcript preview: "${finalTranscript.slice(0, 140)}${finalTranscript.length > 140 ? "..." : ""}"`,
+      "INFO"
+    );
+    micTestTranscript.textContent = `Transcript: ${finalTranscript}`;
   } else {
     debugLog("Mic test transcript is empty", "WARN");
     micTestTranscript.textContent = "Transcript: (No speech detected)";
@@ -632,43 +814,6 @@ async function stopMicTest() {
   micTestStatus.textContent = "Playing back...";
   const played = await playMicTestRecording(recordedWavBase64);
   micTestStatus.textContent = played ? "Playback complete" : "Playback failed";
-}
-
-async function transcribeMicTestRecording(wavBase64: string): Promise<string> {
-  const provider = getActiveProvider();
-  const providerRuntime = getActiveProviderRuntime();
-  const apiKey = apiKeyInput.value.trim();
-  if (!apiKey) {
-    return `${getActiveProviderLabel()} API key required for transcription`;
-  }
-
-  try {
-    const pcmChunksBase64 = await wavToPcmChunksBase64(wavBase64);
-    debugLog(
-      `Mic test: prepared ${pcmChunksBase64.length} PCM chunks for ${getActiveProviderLabel()} live transcription`,
-      "INFO"
-    );
-    if (pcmChunksBase64.length === 0) {
-      return "";
-    }
-
-    const transcript = await providerRuntime.transcribeWithLivePipeline({
-      apiKey,
-      language: languageSelect.value || "auto",
-      preferredModel:
-        liveModelSelect.value || currentSettings.providers[provider].selectedModel,
-      fallbackModels: currentSettings.providers[provider].modelCache?.models ?? [],
-      pcmChunksBase64,
-      settleDelayMs: 2200,
-      chunkIntervalMs: 20,
-    });
-    debugLog(`Mic test transcript chars: ${transcript.length}`, "INFO");
-    return transcript.trim();
-  } catch (err) {
-    console.error("Failed to transcribe mic test recording:", err);
-    debugLog(`Mic test transcription failed: ${String(err)}`, "ERROR");
-    return `${getActiveProviderLabel()} transcription failed`;
-  }
 }
 
 async function playMicTestRecording(wavBase64: string): Promise<boolean> {
@@ -682,21 +827,42 @@ async function playMicTestRecording(wavBase64: string): Promise<boolean> {
 
     const audio = new Audio(url);
     lastMicTestAudio = audio;
+    micTestPlaybackActive = true;
     await audio.play();
 
     const completed = await new Promise<boolean>((resolve) => {
-      audio.addEventListener("ended", () => resolve(true), { once: true });
-      audio.addEventListener("error", () => resolve(false), { once: true });
+      audio.addEventListener(
+        "ended",
+        () => {
+          micTestPlaybackActive = false;
+          targetMicLevel = 0;
+          resolve(true);
+        },
+        { once: true }
+      );
+      audio.addEventListener(
+        "error",
+        () => {
+          micTestPlaybackActive = false;
+          targetMicLevel = 0;
+          resolve(false);
+        },
+        { once: true }
+      );
     });
 
     return completed;
   } catch (err) {
+    micTestPlaybackActive = false;
+    targetMicLevel = 0;
     console.error("Failed to play mic test recording:", err);
     return false;
   }
 }
 
 function cleanupMicTestPlayback() {
+  micTestPlaybackActive = false;
+  targetMicLevel = 0;
   if (lastMicTestAudio) {
     lastMicTestAudio.pause();
     lastMicTestAudio.src = "";
@@ -738,13 +904,32 @@ function setupMicWave() {
   const draw = () => {
     const width = micWaveCanvas.clientWidth;
     const height = micWaveCanvas.clientHeight || 64;
+    const playbackActive =
+      micTestPlaybackActive && lastMicTestAudio !== null && !lastMicTestAudio.paused;
+    const waveActive = micTestActive || playbackActive;
     const testProgress =
       micTestActive && micTestStartedAt > 0
         ? Math.min(1, (Date.now() - micTestStartedAt) / MIC_TEST_DURATION_MS)
         : 0;
 
+    if (playbackActive && lastMicTestAudio) {
+      const duration =
+        Number.isFinite(lastMicTestAudio.duration) && lastMicTestAudio.duration > 0
+          ? lastMicTestAudio.duration
+          : 2.5;
+      const progress = Math.min(1, lastMicTestAudio.currentTime / duration);
+      const envelope = Math.sin(progress * Math.PI);
+      const pulse =
+        (Math.sin(lastMicTestAudio.currentTime * 14) +
+          Math.sin(lastMicTestAudio.currentTime * 22 + 0.8) * 0.45 +
+          Math.sin(lastMicTestAudio.currentTime * 31 + 1.7) * 0.2 +
+          1.65) /
+        2.3;
+      targetMicLevel = Math.max(0.08, Math.min(1, envelope * (0.28 + pulse * 0.72)));
+    }
+
     displayedMicLevel += (targetMicLevel - displayedMicLevel) * 0.15;
-    if (!micTestActive) {
+    if (!waveActive) {
       targetMicLevel = 0;
       displayedMicLevel *= 0.92;
     } else if (displayedMicLevel > 0.002) {
@@ -753,43 +938,25 @@ function setupMicWave() {
 
     ctx.clearRect(0, 0, width, height);
 
-    const baseY = height / 2;
-    const amplitude = micTestActive ? displayedMicLevel * 20 : 0;
+    const amplitude = waveActive ? displayedMicLevel * 20 : 0;
 
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, "rgba(108, 99, 255, 0.3)");
-    gradient.addColorStop(0.5, "rgba(74, 222, 128, 0.95)");
-    gradient.addColorStop(1, "rgba(108, 99, 255, 0.3)");
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = gradient;
-    ctx.shadowColor = "rgba(74, 222, 128, 0.45)";
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-
-    for (let x = 0; x <= width; x += 2) {
-      const progress = x / Math.max(width, 1);
-      const envelope = Math.sin(progress * Math.PI);
-      const y =
-        baseY +
-        Math.sin(progress * 10 + micPhase) * amplitude * envelope +
-        Math.sin(progress * 22 + micPhase * 1.8) * amplitude * 0.16;
-
-      if (x === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    drawWaveform(currentSettings.waveformStyle, {
+      ctx,
+      width,
+      height,
+      amplitude,
+      phase: micPhase,
+      active: waveActive,
+      colorScheme: currentSettings.waveformColorScheme,
+    });
 
     if (micTestActive) {
       const progressX = Math.min(width - 1, Math.max(0, Math.floor(width * testProgress)));
-      const sliderGradient = ctx.createLinearGradient(0, 0, 0, height);
-      sliderGradient.addColorStop(0, "rgba(251, 191, 36, 0.95)");
-      sliderGradient.addColorStop(1, "rgba(248, 113, 113, 0.9)");
+      const sliderGradient = createWaveProgressGradient(
+        ctx,
+        height,
+        currentSettings.waveformColorScheme
+      );
 
       ctx.lineWidth = 2;
       ctx.strokeStyle = sliderGradient;
@@ -882,7 +1049,6 @@ async function handleApiKeyTest() {
       `Testing ${providerLabel} API key with selected model '${selectedModel}'`,
       "INFO"
     );
-    await providerRuntime.validateApiKey(apiKey);
     await providerRuntime.validateModel(apiKey, selectedModel);
     await providerRuntime.probeModelForTranscription(apiKey, selectedModel);
 
@@ -900,22 +1066,21 @@ async function handleApiKeyTest() {
   }
 }
 
-function showSaveStatus(message: string, isError = false) {
+function showSaveStatus(message: string, isError = false, durationMs?: number) {
   if (saveStatusTimer !== null) {
     window.clearTimeout(saveStatusTimer);
   }
 
-  saveStatus.textContent = message;
-  saveStatus.style.color = isError ? "var(--error)" : "";
-  saveStatus.classList.add("visible");
+  appToast.textContent = message;
+  appToast.classList.remove("error", "success");
+  appToast.classList.add(isError ? "error" : "success", "visible");
 
   saveStatusTimer = window.setTimeout(
     () => {
-      saveStatus.classList.remove("visible");
-      saveStatus.style.color = "";
+      appToast.classList.remove("visible", "error", "success");
       saveStatusTimer = null;
     },
-    isError ? 3000 : 1500
+    durationMs ?? (isError ? 3000 : 1500)
   );
 }
 
@@ -949,6 +1114,8 @@ function collectSettingsFromUI(): Settings {
     hotkey: normalizeHotkey(hotkeyInput.value),
     microphoneDeviceId: microphoneSelect.value || "default",
     recordingLoudness,
+    waveformStyle: currentSettings.waveformStyle,
+    waveformColorScheme: currentSettings.waveformColorScheme,
     debugLoggingEnabled: debugLoggingCheckbox.checked,
     typingMode: (selectedMode as Settings["typingMode"]) || "incremental",
     autoStopOnSilence: autoStopCheckbox.checked,
@@ -987,11 +1154,13 @@ function scheduleAutosave(delayMs = AUTOSAVE_DEBOUNCE_MS) {
 
   autosaveTimer = window.setTimeout(() => {
     autosaveTimer = null;
-    void persistSettingsFromUI("Saved");
+    const status = nextAutosaveStatus;
+    nextAutosaveStatus = null;
+    void persistSettingsFromUI(status?.message ?? "Saved", status?.durationMs);
   }, delayMs);
 }
 
-async function persistSettingsFromUI(successMessage: string) {
+async function persistSettingsFromUI(successMessage: string, successDurationMs?: number) {
   if (saveInFlight) {
     savePending = true;
     return;
@@ -1013,7 +1182,7 @@ async function persistSettingsFromUI(successMessage: string) {
     updateConnectionStatus(providerApiKey ? "untested" : "disconnected");
     testApiKeyBtn.disabled = !providerApiKey;
 
-    showSaveStatus(successMessage);
+    showSaveStatus(successMessage, false, successDurationMs);
   } catch (err) {
     console.error("Failed to save settings:", err);
     showSaveStatus("Save failed", true);

@@ -20,6 +20,7 @@ import {
   getProviderSelectedModel,
 } from "./stt/service";
 import type { LiveTranscriber } from "./stt/types";
+import { applyTextCommands, getCommandTailGuardChars } from "./text-commands";
 
 let isRecording = false;
 let settings: Settings;
@@ -31,8 +32,12 @@ let overlayListeningReady = false;
 let lastSpeechTime = 0;
 let silenceTimer: ReturnType<typeof setTimeout> | null = null;
 
+// Incremental tail flush state
+let incrementalTailFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
 // Incremental typing state
 let lastTypedLength = 0;
+let latestRawTranscript = "";
 let recordingStartedAt = 0;
 let recordingChunkCount = 0;
 let recordingApproxAudioBytes = 0;
@@ -52,12 +57,21 @@ let lastRecoveryAttemptAt = 0;
 let recoveryAttemptCount = 0;
 let recoverySuccessCount = 0;
 let recoveryFailureCount = 0;
+let latestMicRms = 0;
+let connectedAt = 0;
+let firstTranscriptAt = 0;
+let estimatedConfidencePct = 0;
+let hudLastEmitAt = 0;
 
 const TRANSCRIPT_STALL_WARN_MS = 5000;
 const TRANSCRIPT_STALL_WARN_LOG_INTERVAL_MS = 5000;
 const STALL_RECOVERY_TRIGGER_MS = 8500;
 const STALL_RECOVERY_COOLDOWN_MS = 12000;
 const PERIODIC_AUDIO_TURN_BOUNDARY_MS = 12000;
+const OPENAI_PERIODIC_AUDIO_TURN_BOUNDARY_MS = 2500;
+const HUD_EMIT_INTERVAL_MS = 180;
+const INCREMENTAL_TAIL_FLUSH_MS = 800;
+const COMMAND_TAIL_GUARD_CHARS = getCommandTailGuardChars();
 
 function ensureTranscriberForProvider() {
   if (settings.sttProvider === activeProvider) {
@@ -88,6 +102,12 @@ function providerLabelForLogs(): string {
   return getProviderLabel(settings.sttProvider);
 }
 
+function getPeriodicAudioTurnBoundaryMs(): number {
+  return settings.sttProvider === "openai"
+    ? OPENAI_PERIODIC_AUDIO_TURN_BOUNDARY_MS
+    : PERIODIC_AUDIO_TURN_BOUNDARY_MS;
+}
+
 async function emitOverlayEvent(eventName: string, payload: Record<string, unknown> = {}) {
   try {
     const overlay = await WebviewWindow.getByLabel("overlay");
@@ -109,6 +129,127 @@ function previewText(text: string, maxLen = 140): string {
     : normalized;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function estimateConfidence(
+  transcriptLength: number,
+  msSincePreviousUpdate: number,
+  isFinal: boolean
+): number {
+  let score = 0.3;
+  score += Math.min(0.35, transcriptLength / 240);
+  score += Math.min(0.18, latestMicRms / 0.07);
+
+  if (msSincePreviousUpdate > 0 && msSincePreviousUpdate <= 1400) {
+    score += 0.12;
+  } else if (msSincePreviousUpdate <= 2800) {
+    score += 0.06;
+  }
+
+  if (isFinal) {
+    score += 0.08;
+  }
+
+  if (recoveryInProgress) {
+    score -= 0.12;
+  }
+
+  return Math.round(clamp(score, 0.05, 0.99) * 100);
+}
+
+function computeHudLatencyMs(now = Date.now()): number | null {
+  if (recordingStartedAt <= 0) {
+    return null;
+  }
+  if (firstTranscriptAt > 0) {
+    return Math.max(0, firstTranscriptAt - recordingStartedAt);
+  }
+  if (connectedAt > 0) {
+    return Math.max(0, connectedAt - recordingStartedAt);
+  }
+  return Math.max(0, now - recordingStartedAt);
+}
+
+function emitHudUpdate(force = false) {
+  if (!isRecording) {
+    return;
+  }
+
+  const now = Date.now();
+  if (!force && now - hudLastEmitAt < HUD_EMIT_INTERVAL_MS) {
+    return;
+  }
+
+  hudLastEmitAt = now;
+  const latencyMs = computeHudLatencyMs(now);
+  const activeModel = transcriber.getActiveModel();
+
+  void emitOverlayEvent("recording-hud-update", {
+    provider: providerLabelForLogs(),
+    model: activeModel,
+    latencyMs,
+    confidencePct: estimatedConfidencePct,
+    confidenceMode: "estimated",
+    debugEnabled: isDebugLoggingEnabled(),
+    waveformStyle: settings.waveformStyle,
+    waveformColorScheme: settings.waveformColorScheme,
+  });
+}
+
+function processFinalTranscriptForTyping(text: string): string {
+  return applyTextCommands(text, settings).trim();
+}
+
+function processIncrementalTranscriptForTyping(text: string, isFinal: boolean): string {
+  const stableRawText = isFinal
+    ? text
+    : text.slice(0, Math.max(0, text.length - COMMAND_TAIL_GUARD_CHARS));
+
+  const processedStableText = applyTextCommands(stableRawText, settings);
+  const newText = processedStableText.slice(lastTypedLength);
+  lastTypedLength = processedStableText.length;
+  latestRawTranscript = text;
+
+  return newText;
+}
+
+/**
+ * Flushes the held-back guard tail in incremental typing mode.
+ * Called after a short idle period (no new transcript updates) so the user
+ * doesn't have to wait for auto-stop to see the last ~60 chars.
+ */
+function flushIncrementalTail() {
+  incrementalTailFlushTimer = null;
+
+  if (!isRecording || settings.typingMode !== "incremental") {
+    return;
+  }
+
+  const tailText = processIncrementalTranscriptForTyping(latestRawTranscript, true);
+  if (!tailText) {
+    return;
+  }
+
+  const callIndex = incrementalTypeCallCount + 1;
+  incrementalTypeCallCount = callIndex;
+  incrementalTypeCharCount += tailText.length;
+
+  debugLog(
+    `Flushing incremental tail after ${INCREMENTAL_TAIL_FLUSH_MS}ms idle: +${tailText.length} chars (typedTotal=${incrementalTypeCharCount})`,
+    "INFO"
+  );
+
+  invoke("type_text", { text: tailText }).catch((err) => {
+    incrementalTypeFailureCount += 1;
+    debugLog(
+      `Incremental tail flush type failed: ${String(err)}`,
+      "ERROR"
+    );
+  });
+}
+
 export async function initApp() {
   settings = await loadSettings();
 
@@ -121,6 +262,7 @@ export async function initApp() {
   // Listen for audio chunks from Rust
   await listen<{ data: string; rms: number }>("audio-chunk", (event) => {
     const { data, rms } = event.payload;
+    latestMicRms = rms;
 
     if (isRecording) {
       recordingChunkCount += 1;
@@ -136,24 +278,24 @@ export async function initApp() {
       }
 
       if (
-        isDebugLoggingEnabled() &&
         transcriber.isConnected() &&
         !recoveryInProgress &&
         recordingChunkCount >= 200 &&
-        now - lastAudioTurnBoundaryAt >= PERIODIC_AUDIO_TURN_BOUNDARY_MS
+        now - lastAudioTurnBoundaryAt >= getPeriodicAudioTurnBoundaryMs()
       ) {
         if (transcriber.signalAudioStreamBoundary("periodic")) {
           audioTurnBoundaryCount += 1;
           lastAudioTurnBoundaryAt = now;
-          debugLog(
-            `Periodic audio turn boundary #${audioTurnBoundaryCount} sent at ${Math.max(0, now - recordingStartedAt)}ms`,
-            "INFO"
-          );
+          if (isDebugLoggingEnabled()) {
+            debugLog(
+              `Periodic audio turn boundary #${audioTurnBoundaryCount} sent at ${Math.max(0, now - recordingStartedAt)}ms`,
+              "INFO"
+            );
+          }
         }
       }
 
       if (
-        isDebugLoggingEnabled() &&
         recordingChunkCount >= 100 &&
         now - lastTranscriptEventAt >= TRANSCRIPT_STALL_WARN_MS &&
         now - lastTranscriptStallWarnAt >= TRANSCRIPT_STALL_WARN_LOG_INTERVAL_MS
@@ -164,6 +306,15 @@ export async function initApp() {
           "WARN"
         );
         lastTranscriptStallWarnAt = now;
+
+        if (settings.sttProvider === "openai" && transcriber.isConnected() && !recoveryInProgress) {
+          const forced = transcriber.signalAudioStreamBoundary("stall-watchdog");
+          if (forced) {
+            audioTurnBoundaryCount += 1;
+            lastAudioTurnBoundaryAt = now;
+            debugLog("OpenAI stall watchdog forced an audio turn boundary", "WARN");
+          }
+        }
 
         if (
           stalledForMs >= STALL_RECOVERY_TRIGGER_MS &&
@@ -177,6 +328,10 @@ export async function initApp() {
 
     // Send audio to active provider
     transcriber.sendAudio(data);
+
+    if (isRecording) {
+      emitHudUpdate();
+    }
 
     // Silence detection for auto-stop
     if (settings.autoStopOnSilence && isRecording) {
@@ -244,6 +399,7 @@ async function startRecording() {
   lastAudioProgressLogAt = recordingStartedAt;
   lastSpeechTime = 0;
   lastTypedLength = 0;
+  latestRawTranscript = "";
   lastTranscriptProgressChars = 0;
   lastTranscriptEventAt = recordingStartedAt;
   lastTranscriptStallWarnAt = 0;
@@ -258,7 +414,16 @@ async function startRecording() {
   recoveryAttemptCount = 0;
   recoverySuccessCount = 0;
   recoveryFailureCount = 0;
+  latestMicRms = 0;
+  connectedAt = 0;
+  firstTranscriptAt = 0;
+  estimatedConfidencePct = 0;
+  hudLastEmitAt = 0;
   overlayListeningReady = false;
+  if (incrementalTailFlushTimer) {
+    clearTimeout(incrementalTailFlushTimer);
+    incrementalTailFlushTimer = null;
+  }
   transcriber.resetTranscript();
 
   debugLog(
@@ -271,7 +436,21 @@ async function startRecording() {
     const overlay = await WebviewWindow.getByLabel("overlay");
     if (overlay) {
       await overlay.show();
-      await overlay.emit("recording-started", { state: "loading" });
+      await overlay.emit("recording-started", {
+        state: "loading",
+        waveformStyle: settings.waveformStyle,
+        waveformColorScheme: settings.waveformColorScheme,
+      });
+      await overlay.emit("recording-hud-update", {
+        provider: providerLabelForLogs(),
+        model: "",
+        latencyMs: null,
+        confidencePct: 0,
+        confidenceMode: "estimated",
+        debugEnabled: isDebugLoggingEnabled(),
+        waveformStyle: settings.waveformStyle,
+        waveformColorScheme: settings.waveformColorScheme,
+      });
     }
   } catch (err) {
     console.error("Failed to show overlay:", err);
@@ -332,6 +511,12 @@ async function stopRecording() {
     silenceTimer = null;
   }
 
+  // Clear incremental tail flush timer (stopRecording handles the final flush)
+  if (incrementalTailFlushTimer) {
+    clearTimeout(incrementalTailFlushTimer);
+    incrementalTailFlushTimer = null;
+  }
+
   // Stop audio capture
   try {
     await invoke("stop_recording");
@@ -341,11 +526,12 @@ async function stopRecording() {
     debugLog(`Failed to stop recording: ${String(err)}`, "ERROR");
   }
 
-  // Small delay to let final transcription arrive
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // Wait for any pending transcription turn to settle (or timeout after 1500ms)
+  await transcriber.waitForPendingTurnSettle(1500);
 
   // Type the final text (all-at-once mode)
-  const finalText = transcriber.getTranscript().trim();
+  const finalRawText = transcriber.getTranscript().trim();
+  const finalText = processFinalTranscriptForTyping(finalRawText);
   debugLog(
     `Stopping recording summary: duration=${durationMs}ms, chunks=${recordingChunkCount}, ~audioBytes=${recordingApproxAudioBytes}, transcriptChars=${finalText.length}, typedCalls=${incrementalTypeCallCount}, typedChars=${incrementalTypeCharCount}, typeFailures=${incrementalTypeFailureCount}, turnBoundaries=${audioTurnBoundaryCount}, recoveryAttempts=${recoveryAttemptCount}, recoverySuccess=${recoverySuccessCount}, recoveryFailures=${recoveryFailureCount}`,
     "INFO"
@@ -362,6 +548,20 @@ async function stopRecording() {
     } catch (err) {
       console.error("Failed to type text:", err);
       debugLog(`Failed to type text: ${String(err)}`, "ERROR");
+    }
+  }
+
+  if (settings.typingMode === "incremental") {
+    const tailText = processIncrementalTranscriptForTyping(latestRawTranscript, true);
+    if (tailText) {
+      try {
+        await invoke("type_text", { text: tailText });
+        incrementalTypeCallCount += 1;
+        incrementalTypeCharCount += tailText.length;
+      } catch (err) {
+        incrementalTypeFailureCount += 1;
+        debugLog(`Failed to type final incremental tail: ${String(err)}`, "ERROR");
+      }
     }
   }
 
@@ -404,6 +604,11 @@ async function stopRecording() {
   recoveryAttemptCount = 0;
   recoverySuccessCount = 0;
   recoveryFailureCount = 0;
+  latestMicRms = 0;
+  connectedAt = 0;
+  firstTranscriptAt = 0;
+  estimatedConfidencePct = 0;
+  hudLastEmitAt = 0;
   overlayListeningReady = false;
 }
 
@@ -460,7 +665,7 @@ async function recoverFromTranscriptStall(stalledForMs: number) {
   }
 }
 
-function onTranscript(text: string, _isFinal: boolean) {
+function onTranscript(text: string, isFinal: boolean) {
   const now = Date.now();
   const msSincePreviousUpdate =
     lastTranscriptEventAt > 0 ? now - lastTranscriptEventAt : 0;
@@ -479,6 +684,14 @@ function onTranscript(text: string, _isFinal: boolean) {
 
   lastTranscriptEventAt = now;
   lastTranscriptStallWarnAt = 0;
+  latestRawTranscript = text;
+
+  if (firstTranscriptAt === 0 && text.trim().length > 0) {
+    firstTranscriptAt = now;
+  }
+
+  estimatedConfidencePct = estimateConfidence(text.length, msSincePreviousUpdate, isFinal);
+  emitHudUpdate(true);
 
   // Emit to overlay for display
   emit("transcript-update", { text });
@@ -494,7 +707,7 @@ function onTranscript(text: string, _isFinal: boolean) {
 
   // Incremental typing mode
   if (settings.typingMode === "incremental" && isRecording) {
-    const newText = text.slice(lastTypedLength);
+    const newText = processIncrementalTranscriptForTyping(text, isFinal);
     if (newText.length > 0) {
       const callIndex = incrementalTypeCallCount + 1;
       const typedChars = newText.length;
@@ -530,7 +743,22 @@ function onTranscript(text: string, _isFinal: boolean) {
             "ERROR"
           );
         });
-      lastTypedLength = text.length;
+    }
+
+    // Reset the tail flush timer. When no new transcript updates arrive
+    // for INCREMENTAL_TAIL_FLUSH_MS, flush the held-back guard chars
+    // so the user doesn't wait for auto-stop to see the last words.
+    if (!isFinal) {
+      if (incrementalTailFlushTimer) {
+        clearTimeout(incrementalTailFlushTimer);
+      }
+      incrementalTailFlushTimer = setTimeout(flushIncrementalTail, INCREMENTAL_TAIL_FLUSH_MS);
+    } else {
+      // isFinal already typed everything (no guard holdback), no flush needed
+      if (incrementalTailFlushTimer) {
+        clearTimeout(incrementalTailFlushTimer);
+        incrementalTailFlushTimer = null;
+      }
     }
   }
 }
@@ -547,8 +775,12 @@ function onStatus(
   emit("gemini-status", { status, message });
 
   if (status === "connected" && isRecording && !overlayListeningReady) {
+    if (connectedAt === 0) {
+      connectedAt = Date.now();
+    }
     overlayListeningReady = true;
     void emitOverlayEvent("recording-ready", { state: "listening" });
+    emitHudUpdate(true);
   }
 
   if (
@@ -572,6 +804,11 @@ function onStatus(
 export function reloadSettings(newSettings: Settings) {
   const oldHotkey = settings.hotkey;
   settings = newSettings;
+
+  void emitOverlayEvent("overlay-settings-updated", {
+    waveformStyle: settings.waveformStyle,
+    waveformColorScheme: settings.waveformColorScheme,
+  });
 
   // Reconfigure transcriber
   configureTranscriberFromSettings();

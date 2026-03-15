@@ -3,9 +3,16 @@ import { GoogleGenAI, Modality, type LiveServerMessage } from "@google/genai";
 import {
   fetchLiveModels,
   probeLiveModelForTranscription,
+  transcribeWithLivePipeline,
   validateApiKey,
   validateLiveModel,
 } from "../src/gemini";
+import {
+  countNormalizedOccurrences,
+  EXPECTED_SAMPLE_TRANSCRIPT,
+  loadSamplePcmChunksBase64,
+  normalizeTranscript,
+} from "./helpers/audio-sample";
 import { requireGeminiApiKeyForTests } from "./helpers/gemini-test-config";
 
 describe("Gemini integration", () => {
@@ -106,4 +113,29 @@ describe("Gemini integration", () => {
     expect(closeReason.includes("not found")).toBe(false);
     expect(receivedMessages).toBeGreaterThanOrEqual(0);
   });
+
+  test(
+    "live pipeline transcribes the sample phrase once without duplication",
+    { timeout: 30000 },
+    async () => {
+      const apiKey = requireGeminiApiKeyForTests();
+      const models = await fetchLiveModels(apiKey);
+      const preferredLiveModel = models.find((model) => model.toLowerCase().includes("native-audio")) ?? models[0];
+
+    const transcript = await transcribeWithLivePipeline({
+      apiKey,
+      language: "en",
+      preferredLiveModel,
+      fallbackLiveModels: models,
+      pcmChunksBase64: loadSamplePcmChunksBase64(),
+      settleDelayMs: 1200,
+      chunkIntervalMs: 0,
+    });
+
+    const normalizedTranscript = normalizeTranscript(transcript);
+    const normalizedExpected = normalizeTranscript(EXPECTED_SAMPLE_TRANSCRIPT);
+      expect(normalizedTranscript).toBe(normalizedExpected);
+      expect(countNormalizedOccurrences(normalizedTranscript, normalizedExpected)).toBe(1);
+    }
+  );
 });

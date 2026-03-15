@@ -1,4 +1,11 @@
 import { load, Store } from "@tauri-apps/plugin-store";
+import { DEFAULT_TEXT_COMMANDS, type TextCommand } from "./text-commands";
+import {
+  isWaveformColorScheme,
+  isWaveformStyle,
+  type WaveformColorScheme,
+  type WaveformStyle,
+} from "./waveform-styles";
 
 export type SttProvider = "gemini" | "openai";
 
@@ -31,11 +38,16 @@ export interface Settings {
   hotkey: string;
   microphoneDeviceId: string;
   recordingLoudness: number;
+  waveformStyle: WaveformStyle;
+  waveformColorScheme: WaveformColorScheme;
+  waveformEasterEggUnlocked: boolean;
   debugLoggingEnabled: boolean;
   typingMode: "all_at_once" | "incremental";
   autoStopOnSilence: boolean;
   autoStopSilenceMs: number;
   language: string;
+  textCommandsEnabled: boolean;
+  customTextCommands: TextCommand[];
 }
 
 const DEFAULTS: Settings = {
@@ -57,11 +69,16 @@ const DEFAULTS: Settings = {
   hotkey: "Alt+G",
   microphoneDeviceId: "default",
   recordingLoudness: 100,
+  waveformStyle: "classic",
+  waveformColorScheme: "aurora",
+  waveformEasterEggUnlocked: false,
   debugLoggingEnabled: false,
   typingMode: "incremental",
   autoStopOnSilence: true,
   autoStopSilenceMs: 4000,
   language: "auto",
+  textCommandsEnabled: true,
+  customTextCommands: [],
 };
 
 export function getDefaultSettings(): Settings {
@@ -118,6 +135,35 @@ function hydrateSelectedModelFromCache(settings: Settings, provider: SttProvider
   }
 }
 
+function toTextCommands(value: unknown): TextCommand[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return null;
+      }
+
+      const maybe = entry as { phrase?: unknown; replacement?: unknown };
+      if (typeof maybe.phrase !== "string" || typeof maybe.replacement !== "string") {
+        return null;
+      }
+
+      const phrase = maybe.phrase.trim();
+      if (!phrase) {
+        return null;
+      }
+
+      return {
+        phrase,
+        replacement: maybe.replacement,
+      };
+    })
+    .filter((entry): entry is TextCommand => entry !== null);
+}
+
 export async function loadSettings(): Promise<Settings> {
   const s = await getStore();
   const settings: Settings = getDefaultSettings();
@@ -171,6 +217,24 @@ export async function loadSettings(): Promise<Settings> {
   const debugLoggingEnabled = await s.get<boolean>("debugLoggingEnabled");
   if (debugLoggingEnabled !== undefined && debugLoggingEnabled !== null) {
     settings.debugLoggingEnabled = debugLoggingEnabled;
+  }
+
+  const waveformStyle = await s.get<string>("waveformStyle");
+  if (isWaveformStyle(waveformStyle)) {
+    settings.waveformStyle = waveformStyle;
+  }
+
+  const waveformColorScheme = await s.get<string>("waveformColorScheme");
+  if (isWaveformColorScheme(waveformColorScheme)) {
+    settings.waveformColorScheme = waveformColorScheme;
+  }
+
+  const waveformEasterEggUnlocked = await s.get<boolean>("waveformEasterEggUnlocked");
+  if (
+    waveformEasterEggUnlocked !== undefined &&
+    waveformEasterEggUnlocked !== null
+  ) {
+    settings.waveformEasterEggUnlocked = waveformEasterEggUnlocked;
   }
 
   const recordingLoudness = await s.get<number>("recordingLoudness");
@@ -232,6 +296,24 @@ export async function loadSettings(): Promise<Settings> {
   const language = await s.get<string>("language");
   if (language !== undefined && language !== null) settings.language = language;
 
+  const textCommandsEnabled = await s.get<boolean>("textCommandsEnabled");
+  if (textCommandsEnabled !== undefined && textCommandsEnabled !== null) {
+    settings.textCommandsEnabled = textCommandsEnabled;
+  }
+
+  const customTextCommands = await s.get<TextCommand[]>("customTextCommands");
+  settings.customTextCommands = toTextCommands(customTextCommands);
+
+  const legacyTextCommands = await s.get<TextCommand[]>("textCommands");
+  if (settings.customTextCommands.length === 0) {
+    settings.customTextCommands = toTextCommands(legacyTextCommands).filter((command) => {
+      const normalizedPhrase = command.phrase.trim().toLowerCase();
+      return !DEFAULT_TEXT_COMMANDS.some(
+        (defaultCommand) => defaultCommand.phrase.toLowerCase() === normalizedPhrase
+      );
+    });
+  }
+
   return settings;
 }
 
@@ -245,6 +327,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("hotkey", settings.hotkey);
   await s.set("microphoneDeviceId", settings.microphoneDeviceId);
   await s.set("recordingLoudness", settings.recordingLoudness);
+  await s.set("waveformStyle", settings.waveformStyle);
+  await s.set("waveformColorScheme", settings.waveformColorScheme);
+  await s.set("waveformEasterEggUnlocked", settings.waveformEasterEggUnlocked);
   await s.set("selectedLiveModel", settings.providers.gemini.selectedModel);
   await s.set("lastKnownGoodLiveModel", settings.providers.gemini.lastKnownGoodModel);
   await s.set("modelCache", settings.providers.gemini.modelCache);
@@ -253,6 +338,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("autoStopOnSilence", settings.autoStopOnSilence);
   await s.set("autoStopSilenceMs", settings.autoStopSilenceMs);
   await s.set("language", settings.language);
+  await s.set("textCommandsEnabled", settings.textCommandsEnabled);
+  await s.set("customTextCommands", settings.customTextCommands);
+  await s.set("textCommands", [...DEFAULT_TEXT_COMMANDS, ...settings.customTextCommands]);
   await s.save();
 }
 

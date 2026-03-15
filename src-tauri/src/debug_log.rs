@@ -7,9 +7,12 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
-    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
+use time::macros::format_description;
+
+const LOG_TIMESTAMP_FORMAT: &[time::format_description::FormatItem<'static>] =
+    format_description!("[year]-[month]-[day]T[hour]:[minute]:[second]");
 
 const MAX_DEBUG_LOG_ENTRIES: usize = 2000;
 
@@ -127,10 +130,12 @@ fn append_log_line(path: &PathBuf, level: &str, message: &str) -> Result<(), Str
         .open(path)
         .map_err(|e| format!("Failed to open debug log file: {}", e))?;
 
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| format!("Failed to compute timestamp: {}", e))?
-        .as_secs();
+    let local_offset = time::UtcOffset::current_local_offset()
+        .map_err(|e| format!("Failed to determine local time offset: {}", e))?;
+    let ts = time::OffsetDateTime::now_utc()
+        .to_offset(local_offset)
+        .format(LOG_TIMESTAMP_FORMAT)
+        .map_err(|e| format!("Failed to format timestamp: {}", e))?;
 
     writeln!(file, "{} [{}] {}", ts, level, message)
         .map_err(|e| format!("Failed to write debug log entry: {}", e))

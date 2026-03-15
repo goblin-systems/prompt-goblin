@@ -96,6 +96,17 @@ body {
   background: transparent;
 }
 
+.overlay-hud {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  font-size: 10px;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  color: rgba(190, 195, 225, 0.78);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
 #overlay-wave-canvas {
   width: 100%;
   height: 100%;

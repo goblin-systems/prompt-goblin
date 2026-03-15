@@ -47,6 +47,7 @@ pub struct AudioState {
     monitor_capture: Mutex<Option<MonitorCapture>>,
     debug_capture: Arc<Mutex<Option<DebugAudioCapture>>>,
     pcm_emit_buffer: Arc<Mutex<Vec<u8>>>,
+    monitor_emit_buffer: Arc<Mutex<Vec<u8>>>,
 }
 
 unsafe impl Send for AudioState {}
@@ -62,6 +63,7 @@ impl Default for AudioState {
             monitor_capture: Mutex::new(None),
             debug_capture: Arc::new(Mutex::new(None)),
             pcm_emit_buffer: Arc::new(Mutex::new(Vec::new())),
+            monitor_emit_buffer: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -148,6 +150,7 @@ pub fn start_mic_monitoring(
     app: AppHandle,
     device_id: Option<String>,
     input_gain: Option<f32>,
+    capture_limit_seconds: Option<u32>,
 ) -> Result<(), String> {
     let state = app.state::<AudioState>();
 
@@ -179,12 +182,33 @@ pub fn start_mic_monitoring(
     let is_monitoring_clone = is_monitoring.clone();
     let last_emit = Arc::new(Mutex::new(std::time::Instant::now()));
     let monitor_samples = Arc::new(Mutex::new(Vec::<i16>::new()));
-    let max_monitor_samples = source_sample_rate as usize * 20;
+    let debug_capture = state.debug_capture.clone();
+    let monitor_emit_buffer = state.monitor_emit_buffer.clone();
+    let max_monitor_samples =
+        capture_limit_seconds.map(|seconds| source_sample_rate as usize * seconds as usize);
+
+    *debug_capture.lock().unwrap() = None;
+    monitor_emit_buffer.lock().unwrap().clear();
+    if app.state::<DebugLogState>().is_enabled() {
+        match create_debug_audio_capture(&app, 16000) {
+            Ok(capture) => {
+                *debug_capture.lock().unwrap() = Some(capture);
+            }
+            Err(err) => {
+                eprintln!("Failed to initialize mic test debug audio file: {}", err);
+            }
+        }
+    }
+
+    let monitor_sample_accumulator: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
 
     let stream = match default_config.sample_format() {
         cpal::SampleFormat::F32 => {
             let last_emit_clone = last_emit.clone();
             let samples_clone = monitor_samples.clone();
+            let debug_capture_clone = debug_capture.clone();
+            let monitor_emit_buffer_clone = monitor_emit_buffer.clone();
+            let monitor_acc_clone = monitor_sample_accumulator.clone();
             device.build_input_stream(
                 &config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
@@ -199,6 +223,25 @@ pub fn start_mic_monitoring(
                         max_monitor_samples,
                         &samples_clone,
                     );
+                    let Some((pcm16_bytes, rms)) = process_audio_f32_to_pcm16(
+                        &gained,
+                        source_channels,
+                        source_sample_rate,
+                        16000,
+                        1.0,
+                        &monitor_acc_clone,
+                    ) else {
+                        emit_mic_level(&gained, source_channels, &last_emit_clone, &app_handle);
+                        return;
+                    };
+                    append_debug_audio_chunk(&debug_capture_clone, &pcm16_bytes);
+                    emit_coalesced_audio_chunks_named(
+                        &app_handle,
+                        &monitor_emit_buffer_clone,
+                        &pcm16_bytes,
+                        rms,
+                        "mic-test-audio-chunk",
+                    );
                     emit_mic_level(&gained, source_channels, &last_emit_clone, &app_handle);
                 },
                 |err| eprintln!("Mic monitor stream error: {}", err),
@@ -208,6 +251,9 @@ pub fn start_mic_monitoring(
         cpal::SampleFormat::I16 => {
             let last_emit_clone = last_emit.clone();
             let samples_clone = monitor_samples.clone();
+            let debug_capture_clone = debug_capture.clone();
+            let monitor_emit_buffer_clone = monitor_emit_buffer.clone();
+            let monitor_acc_clone = monitor_sample_accumulator.clone();
             device.build_input_stream(
                 &config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
@@ -224,6 +270,25 @@ pub fn start_mic_monitoring(
                         max_monitor_samples,
                         &samples_clone,
                     );
+                    let Some((pcm16_bytes, rms)) = process_audio_f32_to_pcm16(
+                        &float_data,
+                        source_channels,
+                        source_sample_rate,
+                        16000,
+                        1.0,
+                        &monitor_acc_clone,
+                    ) else {
+                        emit_mic_level(&float_data, source_channels, &last_emit_clone, &app_handle);
+                        return;
+                    };
+                    append_debug_audio_chunk(&debug_capture_clone, &pcm16_bytes);
+                    emit_coalesced_audio_chunks_named(
+                        &app_handle,
+                        &monitor_emit_buffer_clone,
+                        &pcm16_bytes,
+                        rms,
+                        "mic-test-audio-chunk",
+                    );
                     emit_mic_level(&float_data, source_channels, &last_emit_clone, &app_handle);
                 },
                 |err| eprintln!("Mic monitor stream error: {}", err),
@@ -236,9 +301,10 @@ pub fn start_mic_monitoring(
     }
     .map_err(|e| format!("Failed to build mic monitor stream: {}", e))?;
 
-    stream
-        .play()
-        .map_err(|e| format!("Failed to start mic monitor stream: {}", e))?;
+    if let Err(e) = stream.play() {
+        discard_debug_capture(&debug_capture);
+        return Err(format!("Failed to start mic monitor stream: {}", e));
+    }
 
     state.is_monitoring.store(true, Ordering::SeqCst);
     let handle = StreamHandle::new(stream);
@@ -281,15 +347,27 @@ fn stop_mic_monitoring_internal(
         }
     }
 
+    flush_pending_emit_audio_named(&app, &state.monitor_emit_buffer, "mic-test-audio-chunk");
+
     let _ = app.emit(
         "mic-monitoring-status",
         MicMonitoringStatusPayload { monitoring: false },
     );
 
     if !include_recording {
+        let mut debug_capture = state.debug_capture.lock().unwrap();
+        if let Some(capture) = debug_capture.take() {
+            finalize_debug_audio_capture(capture)?;
+        }
         *state.monitor_capture.lock().unwrap() = None;
         return Ok(None);
     }
+
+    let mut debug_capture = state.debug_capture.lock().unwrap();
+    if let Some(capture) = debug_capture.take() {
+        finalize_debug_audio_capture(capture)?;
+    }
+    drop(debug_capture);
 
     let capture = state.monitor_capture.lock().unwrap().take();
     let Some(capture) = capture else {
@@ -551,7 +629,29 @@ fn process_audio_f32(
     debug_capture: &Arc<Mutex<Option<DebugAudioCapture>>>,
     emit_buffer: &Arc<Mutex<Vec<u8>>>,
 ) {
-    // Downmix to mono by averaging channels
+    let Some((pcm16_bytes, rms)) = process_audio_f32_to_pcm16(
+        data,
+        source_channels,
+        source_sample_rate,
+        target_sample_rate,
+        gain,
+        accumulator,
+    ) else {
+        return;
+    };
+
+    append_debug_audio_chunk(debug_capture, &pcm16_bytes);
+    emit_coalesced_audio_chunks(app, emit_buffer, &pcm16_bytes, rms);
+}
+
+fn process_audio_f32_to_pcm16(
+    data: &[f32],
+    source_channels: usize,
+    source_sample_rate: u32,
+    target_sample_rate: u32,
+    gain: f32,
+    accumulator: &Arc<Mutex<Vec<f32>>>,
+) -> Option<(Vec<u8>, f32)> {
     let mono: Vec<f32> = data
         .chunks(source_channels)
         .map(|frame| {
@@ -560,16 +660,14 @@ fn process_audio_f32(
         })
         .collect();
 
-    // Simple linear resampling
     let ratio = source_sample_rate as f64 / target_sample_rate as f64;
 
     let mut acc = accumulator.lock().unwrap();
     acc.extend_from_slice(&mono);
 
-    // Calculate how many output samples we can produce
     let output_samples = (acc.len() as f64 / ratio) as usize;
     if output_samples == 0 {
-        return;
+        return None;
     }
 
     let mut resampled = Vec::with_capacity(output_samples);
@@ -588,13 +686,11 @@ fn process_audio_f32(
         resampled.push(sample);
     }
 
-    // Remove consumed samples from accumulator
     let consumed = (output_samples as f64 * ratio) as usize;
     let consumed = consumed.min(acc.len());
     acc.drain(..consumed);
     drop(acc);
 
-    // Calculate RMS energy for silence detection
     let rms = if !resampled.is_empty() {
         let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
         (sum_sq / resampled.len() as f32).sqrt()
@@ -602,7 +698,6 @@ fn process_audio_f32(
         0.0
     };
 
-    // Convert to PCM16 little-endian bytes
     let pcm16_bytes: Vec<u8> = resampled
         .iter()
         .flat_map(|&sample| {
@@ -612,8 +707,7 @@ fn process_audio_f32(
         })
         .collect();
 
-    append_debug_audio_chunk(debug_capture, &pcm16_bytes);
-    emit_coalesced_audio_chunks(app, emit_buffer, &pcm16_bytes, rms);
+    Some((pcm16_bytes, rms))
 }
 
 fn emit_coalesced_audio_chunks(
@@ -621,6 +715,16 @@ fn emit_coalesced_audio_chunks(
     emit_buffer: &Arc<Mutex<Vec<u8>>>,
     pcm16_bytes: &[u8],
     rms: f32,
+) {
+    emit_coalesced_audio_chunks_named(app, emit_buffer, pcm16_bytes, rms, "audio-chunk");
+}
+
+fn emit_coalesced_audio_chunks_named(
+    app: &AppHandle,
+    emit_buffer: &Arc<Mutex<Vec<u8>>>,
+    pcm16_bytes: &[u8],
+    rms: f32,
+    event_name: &str,
 ) {
     if pcm16_bytes.is_empty() {
         return;
@@ -633,11 +737,19 @@ fn emit_coalesced_audio_chunks(
         let chunk = pending[..EMIT_PCM_CHUNK_BYTES].to_vec();
         pending.drain(..EMIT_PCM_CHUNK_BYTES);
         let b64 = base64::engine::general_purpose::STANDARD.encode(chunk);
-        let _ = app.emit("audio-chunk", AudioChunkPayload { data: b64, rms });
+        let _ = app.emit(event_name, AudioChunkPayload { data: b64, rms });
     }
 }
 
 fn flush_pending_emit_audio(app: &AppHandle, emit_buffer: &Arc<Mutex<Vec<u8>>>) {
+    flush_pending_emit_audio_named(app, emit_buffer, "audio-chunk");
+}
+
+fn flush_pending_emit_audio_named(
+    app: &AppHandle,
+    emit_buffer: &Arc<Mutex<Vec<u8>>>,
+    event_name: &str,
+) {
     let mut pending = emit_buffer.lock().unwrap();
     if pending.is_empty() {
         return;
@@ -652,7 +764,7 @@ fn flush_pending_emit_audio(app: &AppHandle, emit_buffer: &Arc<Mutex<Vec<u8>>>) 
 
     let b64 = base64::engine::general_purpose::STANDARD.encode(chunk);
     let _ = app.emit(
-        "audio-chunk",
+        event_name,
         AudioChunkPayload {
             data: b64,
             rms: 0.0,
@@ -663,7 +775,7 @@ fn flush_pending_emit_audio(app: &AppHandle, emit_buffer: &Arc<Mutex<Vec<u8>>>) 
 fn collect_monitor_samples(
     data: &[f32],
     source_channels: usize,
-    max_samples: usize,
+    max_samples: Option<usize>,
     samples: &Arc<Mutex<Vec<i16>>>,
 ) {
     let mut guard = samples.lock().unwrap();
@@ -674,9 +786,11 @@ fn collect_monitor_samples(
         guard.push((clamped * 32767.0) as i16);
     }
 
-    if guard.len() > max_samples {
-        let overflow = guard.len() - max_samples;
-        guard.drain(..overflow);
+    if let Some(max_samples) = max_samples {
+        if guard.len() > max_samples {
+            let overflow = guard.len() - max_samples;
+            guard.drain(..overflow);
+        }
     }
 }
 

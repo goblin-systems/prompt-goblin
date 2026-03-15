@@ -1,4 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
+import {
+  drawWaveform,
+  isWaveformColorScheme,
+  isWaveformStyle,
+  type WaveformColorScheme,
+  type WaveformStyle,
+} from "./waveform-styles";
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let startTime = 0;
@@ -8,6 +15,8 @@ let targetMicLevel = 0;
 let displayedMicLevel = 0;
 let wavePhase = 0;
 let listeningDelayTimer: ReturnType<typeof setTimeout> | null = null;
+let currentWaveformStyle: WaveformStyle = "classic";
+let currentWaveformColorScheme: WaveformColorScheme = "aurora";
 
 const LISTENING_READY_DELAY_MS = 1000;
 
@@ -25,6 +34,10 @@ const overlayWaveCanvas = document.getElementById(
   "overlay-wave-canvas"
 ) as HTMLCanvasElement;
 const recordingDot = document.getElementById("recording-dot") as HTMLElement;
+const overlayHud = document.getElementById("overlay-hud") as HTMLElement;
+const overlayHudLatency = document.getElementById("overlay-hud-latency") as HTMLElement;
+const overlayHudConfidence = document.getElementById("overlay-hud-confidence") as HTMLElement;
+let showDebugHud = false;
 
 window.addEventListener("contextmenu", (event) => {
   event.preventDefault();
@@ -69,6 +82,41 @@ function setOverlayState(state: "loading" | "listening" | "done") {
   overlayLabel.textContent = "Done";
 }
 
+function formatHudLatency(latencyMs: number | null | undefined): string {
+  if (latencyMs === null || latencyMs === undefined || !Number.isFinite(latencyMs)) {
+    return "Latency --";
+  }
+
+  if (latencyMs < 1000) {
+    return `Latency ${Math.max(0, Math.round(latencyMs))}ms`;
+  }
+
+  return `Latency ${(latencyMs / 1000).toFixed(1)}s`;
+}
+
+function formatHudConfidence(
+  confidencePct: number | null | undefined,
+  mode: string | null | undefined
+): string {
+  if (confidencePct === null || confidencePct === undefined || !Number.isFinite(confidencePct)) {
+    return "Confidence --";
+  }
+
+  const marker = mode === "estimated" ? "~" : "";
+  return `Confidence${marker} ${Math.round(confidencePct)}%`;
+}
+
+function setHudVisibility() {
+  overlayHud.style.display = showDebugHud ? "flex" : "none";
+}
+
+function resetHud() {
+  overlayHudLatency.textContent = "Latency --";
+  overlayHudConfidence.textContent = "Confidence --";
+  overlayHud.removeAttribute("title");
+  setHudVisibility();
+}
+
 function setupOverlayWave() {
   const ctx = overlayWaveCanvas.getContext("2d");
   if (!ctx) {
@@ -109,39 +157,19 @@ function setupOverlayWave() {
 
     ctx.clearRect(0, 0, width, height);
 
-    const baseY = height / 2;
     const amplitude = overlayRecordingActive
       ? displayedMicLevel * OVERLAY_WAVE_AMPLITUDE_PX
       : 0;
 
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
-    gradient.addColorStop(0, "rgba(108, 99, 255, 0.3)");
-    gradient.addColorStop(0.5, "rgba(74, 222, 128, 0.95)");
-    gradient.addColorStop(1, "rgba(108, 99, 255, 0.3)");
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = gradient;
-    ctx.shadowColor = "rgba(74, 222, 128, 0.45)";
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-
-    for (let x = 0; x <= width; x += 2) {
-      const progress = x / Math.max(width, 1);
-      const envelope = Math.sin(progress * Math.PI);
-      const y =
-        baseY +
-        Math.sin(progress * 10 + wavePhase) * amplitude * envelope +
-        Math.sin(progress * 22 + wavePhase * 1.8) * amplitude * 0.16;
-
-      if (x === 0) {
-        ctx.moveTo(x, y);
-      } else {
-        ctx.lineTo(x, y);
-      }
-    }
-
-    ctx.stroke();
-    ctx.shadowBlur = 0;
+    drawWaveform(currentWaveformStyle, {
+      ctx,
+      width,
+      height,
+      amplitude,
+      phase: wavePhase,
+      active: overlayRecordingActive,
+      colorScheme: currentWaveformColorScheme,
+    });
 
     waveRaf = requestAnimationFrame(draw);
   };
@@ -152,18 +180,31 @@ function setupOverlayWave() {
 }
 
 setupOverlayWave();
+resetHud();
 
 // Listen for recording events from the main window
-listen<{ state?: "loading" | "listening" }>("recording-started", (event) => {
+listen<{
+  state?: "loading" | "listening";
+  waveformStyle?: string;
+  waveformColorScheme?: string;
+}>("recording-started", (event) => {
   if (listeningDelayTimer) {
     clearTimeout(listeningDelayTimer);
     listeningDelayTimer = null;
+  }
+
+  if (isWaveformStyle(event.payload?.waveformStyle)) {
+    currentWaveformStyle = event.payload.waveformStyle;
+  }
+  if (isWaveformColorScheme(event.payload?.waveformColorScheme)) {
+    currentWaveformColorScheme = event.payload.waveformColorScheme;
   }
 
   overlayRecordingActive = true;
   targetMicLevel = 0;
   displayedMicLevel = 0;
   wavePhase = 0;
+  resetHud();
   setOverlayState(event.payload?.state === "listening" ? "listening" : "loading");
   overlayTranscript.textContent = "";
   overlayTranscript.classList.remove("visible");
@@ -196,8 +237,52 @@ listen("recording-stopped", () => {
 
   overlayRecordingActive = false;
   targetMicLevel = 0;
+  resetHud();
   setOverlayState("done");
   stopTimer();
+});
+
+listen<{ waveformStyle?: string; waveformColorScheme?: string }>(
+  "overlay-settings-updated",
+  (event) => {
+  if (isWaveformStyle(event.payload.waveformStyle)) {
+    currentWaveformStyle = event.payload.waveformStyle;
+  }
+    if (isWaveformColorScheme(event.payload.waveformColorScheme)) {
+      currentWaveformColorScheme = event.payload.waveformColorScheme;
+    }
+  }
+);
+
+listen<{
+  latencyMs?: number | null;
+  confidencePct?: number | null;
+  confidenceMode?: string;
+  provider?: string;
+  model?: string;
+  debugEnabled?: boolean;
+  waveformStyle?: string;
+  waveformColorScheme?: string;
+}>("recording-hud-update", (event) => {
+  showDebugHud = event.payload.debugEnabled === true;
+  setHudVisibility();
+  if (isWaveformStyle(event.payload.waveformStyle)) {
+    currentWaveformStyle = event.payload.waveformStyle;
+  }
+  if (isWaveformColorScheme(event.payload.waveformColorScheme)) {
+    currentWaveformColorScheme = event.payload.waveformColorScheme;
+  }
+  overlayHudLatency.textContent = formatHudLatency(event.payload.latencyMs);
+  overlayHudConfidence.textContent = formatHudConfidence(
+    event.payload.confidencePct,
+    event.payload.confidenceMode
+  );
+
+  const provider = event.payload.provider?.trim() ?? "";
+  const model = event.payload.model?.trim() ?? "";
+  if (provider || model) {
+    overlayHud.title = `${provider}${provider && model ? " - " : ""}${model}`;
+  }
 });
 
 listen<{ rms: number }>("audio-chunk", (event) => {

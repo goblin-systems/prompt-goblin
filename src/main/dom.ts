@@ -19,6 +19,9 @@ export interface MainDom {
   recordingLoudnessValue: HTMLElement;
   refreshMicrophonesBtn: HTMLButtonElement;
   micTestBtn: HTMLButtonElement;
+  continuousMicTestBtn: HTMLButtonElement;
+  waveStyleBtn: HTMLButtonElement;
+  waveColorBtn: HTMLButtonElement;
   micTestStatus: HTMLElement;
   micTestTranscript: HTMLElement;
   micSignalIndicator: HTMLElement;
@@ -39,7 +42,7 @@ export interface MainDom {
   silenceTimeoutInput: HTMLInputElement;
   languageSelect: HTMLSelectElement;
   resetDefaultsBtn: HTMLButtonElement;
-  saveStatus: HTMLElement;
+  appToast: HTMLElement;
   windowMinimizeBtn: HTMLButtonElement | null;
   windowCloseBtn: HTMLButtonElement;
 }
@@ -70,6 +73,9 @@ export function getMainDom(doc: Document): MainDom {
     recordingLoudnessValue: byId<HTMLElement>(doc, "recording-loudness-value"),
     refreshMicrophonesBtn: byId<HTMLButtonElement>(doc, "refresh-microphones-btn"),
     micTestBtn: byId<HTMLButtonElement>(doc, "mic-test-btn"),
+    continuousMicTestBtn: byId<HTMLButtonElement>(doc, "continuous-mic-test-btn"),
+    waveStyleBtn: byId<HTMLButtonElement>(doc, "wave-style-btn"),
+    waveColorBtn: byId<HTMLButtonElement>(doc, "wave-color-btn"),
     micTestStatus: byId<HTMLElement>(doc, "mic-test-status"),
     micTestTranscript: byId<HTMLElement>(doc, "mic-test-transcript"),
     micSignalIndicator: byId<HTMLElement>(doc, "mic-signal-indicator"),
@@ -92,7 +98,7 @@ export function getMainDom(doc: Document): MainDom {
     silenceTimeoutInput: byId<HTMLInputElement>(doc, "silence-timeout"),
     languageSelect: byId<HTMLSelectElement>(doc, "language-select"),
     resetDefaultsBtn: byId<HTMLButtonElement>(doc, "reset-defaults-btn"),
-    saveStatus: byId<HTMLElement>(doc, "save-status"),
+    appToast: byId<HTMLElement>(doc, "app-toast"),
     windowMinimizeBtn: byIdOptional<HTMLButtonElement>(doc, "window-minimize-btn"),
     windowCloseBtn: byId<HTMLButtonElement>(doc, "window-close-btn"),
   };
