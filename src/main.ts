@@ -1,4 +1,6 @@
 import {
+  saveCorrectionProviderLastKnownGoodModel,
+  saveCorrectionProviderModelCache,
   getDefaultSettings,
   getProviderApiKey as getProviderApiKeyFromSettings,
   getProviderLastKnownGoodModel,
@@ -26,11 +28,21 @@ import {
   getProviderRuntime,
 } from "./stt/service";
 import {
+  getCorrectionFallbackModels,
+  getCorrectionLabel,
+  getCorrectionRuntime,
+  getCorrectionSelectedModel,
+  isTranscriptionCorrectionEnabled,
+} from "./correction/service";
+import {
+  populateCorrectionModelOptions as renderCorrectionModelOptions,
   getMainDom,
   populateLiveModelOptions as renderLiveModelOptions,
   populateUI as renderUI,
+  setCorrectionModelHint as renderCorrectionModelHint,
   setLiveModelHint as renderLiveModelHint,
   updateConnectionStatus as renderConnectionStatus,
+  updateTranscriptCorrectionUI as renderTranscriptCorrectionUI,
   updateTypingModeHint as renderTypingModeHint,
   type ConnectionStatus,
   type MainDom,
@@ -82,10 +94,17 @@ let connectionStatus: HTMLElement;
 let testApiKeyBtn: HTMLButtonElement;
 let typingModeRadios: NodeListOf<HTMLInputElement>;
 let typingModeHint: HTMLElement;
+let transcriptCorrectionCheckbox: HTMLInputElement;
+let transcriptCorrectionHint: HTMLElement;
+let transcriptCorrectionControls: HTMLElement;
+let correctionModelSelect: HTMLSelectElement;
+let refreshCorrectionModelsBtn: HTMLButtonElement;
+let correctionModelHint: HTMLElement;
 let autoStopCheckbox: HTMLInputElement;
 let silenceTimeoutField: HTMLElement;
 let silenceTimeoutInput: HTMLInputElement;
 let languageSelect: HTMLSelectElement;
+let targetLanguageSelect: HTMLSelectElement;
 let resetDefaultsBtn: HTMLButtonElement;
 let appToast: HTMLElement;
 let windowMinimizeBtn: HTMLButtonElement | null;
@@ -126,8 +145,16 @@ function getActiveProviderRuntime() {
   return getProviderRuntime(getActiveProvider());
 }
 
+function getActiveCorrectionRuntime() {
+  return getCorrectionRuntime(getActiveProvider());
+}
+
 function getActiveProviderLabel(): string {
   return getProviderLabel(getActiveProvider());
+}
+
+function getActiveCorrectionLabel(): string {
+  return getCorrectionLabel(getActiveProvider());
 }
 
 function updateApiKeyTextForProvider() {
@@ -194,10 +221,17 @@ window.addEventListener("DOMContentLoaded", async () => {
     testApiKeyBtn,
     typingModeRadios,
     typingModeHint,
+    transcriptCorrectionCheckbox,
+    transcriptCorrectionHint,
+    transcriptCorrectionControls,
+    correctionModelSelect,
+    refreshCorrectionModelsBtn,
+    correctionModelHint,
     autoStopCheckbox,
     silenceTimeoutField,
     silenceTimeoutInput,
     languageSelect,
+    targetLanguageSelect,
     resetDefaultsBtn,
     appToast,
     windowMinimizeBtn,
@@ -209,6 +243,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   populateUI(currentSettings);
   updateApiKeyTextForProvider();
   await refreshLiveModelList(false);
+  await refreshCorrectionModelList(false);
   await refreshMicrophoneList(currentSettings.microphoneDeviceId);
   await configureDebugLogging(currentSettings.debugLoggingEnabled);
   updateDebugLogHint();
@@ -295,6 +330,7 @@ function populateUI(settings: Settings) {
   renderUI(dom, settings);
   updateRecordingLoudnessValue();
   updateWaveToolButtons();
+  updateTranscriptCorrectionUI();
 }
 
 function updateWaveToolButtons() {
@@ -360,6 +396,8 @@ function setupEventListeners() {
     updateConnectionStatus(providerSettings.apiKey ? "untested" : "disconnected");
     testApiKeyBtn.disabled = !providerSettings.apiKey;
     await refreshLiveModelList(false);
+    await refreshCorrectionModelList(false);
+    updateTranscriptCorrectionUI();
     scheduleAutosave(0);
   });
 
@@ -367,8 +405,14 @@ function setupEventListeners() {
   typingModeRadios.forEach((radio) => {
     radio.addEventListener("change", () => {
       updateTypingModeHint(radio.value);
+      updateTranscriptCorrectionUI();
       scheduleAutosave(0);
     });
+  });
+
+  transcriptCorrectionCheckbox.addEventListener("change", () => {
+    updateTranscriptCorrectionUI();
+    scheduleAutosave(0);
   });
 
   // Auto-stop toggle
@@ -391,10 +435,18 @@ function setupEventListeners() {
     await refreshLiveModelList(true);
   });
 
+  refreshCorrectionModelsBtn.addEventListener("click", async () => {
+    await refreshCorrectionModelList(true);
+  });
+
   liveModelSelect.addEventListener("change", () => {
     if (apiKeyInput.value.trim() !== lastTestedApiKey) {
       updateConnectionStatus("untested");
     }
+    scheduleAutosave(0);
+  });
+
+  correctionModelSelect.addEventListener("change", () => {
     scheduleAutosave(0);
   });
 
@@ -408,6 +460,9 @@ function setupEventListeners() {
       updateConnectionStatus("disconnected");
       populateLiveModelOptions([], "");
       setLiveModelHint("Enter API key to fetch models.");
+      populateCorrectionModelOptions([], "");
+      setCorrectionModelHint("Enter API key to fetch correction models.");
+      updateTranscriptCorrectionUI();
       scheduleAutosave();
       return;
     }
@@ -428,6 +483,19 @@ function setupEventListeners() {
       setLiveModelHint("Model list may be outdated. Click Refresh.");
     }
 
+    const correctionCache = currentSettings.transcriptionCorrection.providers[provider].modelCache;
+    const correctionCacheMatches =
+      correctionCache &&
+      correctionCache.apiKeyFingerprint === fingerprint &&
+      Array.isArray(correctionCache.models) &&
+      correctionCache.models.length > 0;
+
+    if (!correctionCacheMatches) {
+      setCorrectionModelHint("Correction model list may be outdated. Click Refresh.");
+    }
+
+    updateTranscriptCorrectionUI();
+
     scheduleAutosave();
   });
 
@@ -440,6 +508,10 @@ function setupEventListeners() {
   });
 
   languageSelect.addEventListener("change", () => {
+    scheduleAutosave(0);
+  });
+
+  targetLanguageSelect.addEventListener("change", () => {
     scheduleAutosave(0);
   });
 
@@ -547,6 +619,23 @@ function populateLiveModelOptions(models: string[], preferredModel: string) {
   renderLiveModelOptions(dom, models, preferredModel);
 }
 
+function setCorrectionModelHint(text: string) {
+  renderCorrectionModelHint(dom, text);
+}
+
+function populateCorrectionModelOptions(models: string[], preferredModel: string) {
+  renderCorrectionModelOptions(dom, models, preferredModel);
+}
+
+function updateTranscriptCorrectionUI() {
+  const selectedMode = Array.from(typingModeRadios).find((radio) => radio.checked)?.value;
+  renderTranscriptCorrectionUI(
+    dom,
+    (selectedMode as Settings["typingMode"]) || "incremental",
+    transcriptCorrectionCheckbox.checked
+  );
+}
+
 async function refreshLiveModelList(forceApiRefresh: boolean) {
   const provider = getActiveProvider();
   const providerLabel = getActiveProviderLabel();
@@ -616,6 +705,85 @@ async function refreshLiveModelList(forceApiRefresh: boolean) {
     debugLog(`Failed to load model list: ${message}`, "ERROR");
   } finally {
     refreshModelsBtn.disabled = false;
+  }
+}
+
+async function refreshCorrectionModelList(forceApiRefresh: boolean) {
+  const provider = getActiveProvider();
+  const providerLabel = getActiveCorrectionLabel();
+  const providerRuntime = getActiveCorrectionRuntime();
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) {
+    populateCorrectionModelOptions([], "");
+    setCorrectionModelHint("Enter API key to fetch correction models.");
+    updateTranscriptCorrectionUI();
+    return;
+  }
+
+  const now = Date.now();
+  const fingerprint = fingerprintApiKey(apiKey);
+  const cache = currentSettings.transcriptionCorrection.providers[provider].modelCache;
+  const cacheIsFresh = isModelCacheFresh(cache, fingerprint, now, MODEL_CACHE_TTL_MS);
+
+  if (!forceApiRefresh && cacheIsFresh && cache) {
+    const preferred = selectPreferredModel(
+      cache.models,
+      currentSettings.transcriptionCorrection.providers[provider].selectedModel,
+      currentSettings.transcriptionCorrection.providers[provider].lastKnownGoodModel
+    );
+    populateCorrectionModelOptions(cache.models, preferred);
+    setCorrectionModelHint(`Loaded ${cache.models.length} correction models from cache.`);
+    updateTranscriptCorrectionUI();
+    debugLog(`Using cached ${providerLabel} correction models (count=${cache.models.length})`, "INFO");
+    return;
+  }
+
+  try {
+    refreshCorrectionModelsBtn.disabled = true;
+    setCorrectionModelHint(`Fetching correction models from ${providerLabel} API...`);
+    debugLog(`Fetching correction model list from ${providerLabel} API`, "INFO");
+    const models = await providerRuntime.fetchModels(apiKey);
+
+    if (models.length === 0) {
+      throw new Error(`No ${providerLabel} correction models returned by API`);
+    }
+
+    const preferred = selectPreferredModel(
+      models,
+      currentSettings.transcriptionCorrection.providers[provider].selectedModel,
+      currentSettings.transcriptionCorrection.providers[provider].lastKnownGoodModel
+    );
+    populateCorrectionModelOptions(models, preferred);
+
+    currentSettings.transcriptionCorrection.providers[provider].modelCache = {
+      apiKeyFingerprint: fingerprint,
+      fetchedAt: Date.now(),
+      models,
+    };
+    await saveCorrectionProviderModelCache(
+      provider,
+      currentSettings.transcriptionCorrection.providers[provider].modelCache
+    );
+
+    if (!models.includes(currentSettings.transcriptionCorrection.providers[provider].selectedModel)) {
+      currentSettings.transcriptionCorrection.providers[provider].selectedModel = selectPreferredModel(
+        models,
+        currentSettings.transcriptionCorrection.providers[provider].selectedModel,
+        currentSettings.transcriptionCorrection.providers[provider].lastKnownGoodModel
+      );
+      correctionModelSelect.value =
+        currentSettings.transcriptionCorrection.providers[provider].selectedModel;
+    }
+
+    setCorrectionModelHint(`Loaded ${models.length} correction models from API.`);
+    debugLog(`Loaded ${providerLabel} correction models from API (count=${models.length})`, "INFO");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    setCorrectionModelHint(`Failed to load correction models: ${message}`);
+    debugLog(`Failed to load correction model list: ${message}`, "ERROR");
+  } finally {
+    updateTranscriptCorrectionUI();
+    refreshCorrectionModelsBtn.disabled = false;
   }
 }
 
@@ -1111,6 +1279,13 @@ function collectSettingsFromUI(): Settings {
       gemini: { ...currentSettings.providers.gemini },
       openai: { ...currentSettings.providers.openai },
     },
+    transcriptionCorrection: {
+      enabled: transcriptCorrectionCheckbox.checked,
+      providers: {
+        gemini: { ...currentSettings.transcriptionCorrection.providers.gemini },
+        openai: { ...currentSettings.transcriptionCorrection.providers.openai },
+      },
+    },
     hotkey: normalizeHotkey(hotkeyInput.value),
     microphoneDeviceId: microphoneSelect.value || "default",
     recordingLoudness,
@@ -1121,11 +1296,14 @@ function collectSettingsFromUI(): Settings {
     autoStopOnSilence: autoStopCheckbox.checked,
     autoStopSilenceMs,
     language: languageSelect.value,
+    targetLanguage: targetLanguageSelect.value,
   };
 
   nextSettings.providers[provider].apiKey = apiKeyInput.value.trim();
   nextSettings.providers[provider].selectedModel =
     liveModelSelect.value || currentSettings.providers[provider].selectedModel;
+  nextSettings.transcriptionCorrection.providers[provider].selectedModel =
+    correctionModelSelect.value || currentSettings.transcriptionCorrection.providers[provider].selectedModel;
 
   return nextSettings;
 }
@@ -1205,6 +1383,7 @@ async function handleResetToDefaults() {
   populateUI(currentSettings);
   updateApiKeyTextForProvider();
   setLiveModelHint("Enter API key to fetch models.");
+  setCorrectionModelHint("Enter API key to fetch correction models.");
   updateConnectionStatus("disconnected");
   testApiKeyBtn.disabled = true;
 

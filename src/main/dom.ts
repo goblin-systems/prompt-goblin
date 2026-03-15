@@ -37,10 +37,17 @@ export interface MainDom {
   testApiKeyBtn: HTMLButtonElement;
   typingModeRadios: NodeListOf<HTMLInputElement>;
   typingModeHint: HTMLElement;
+  transcriptCorrectionCheckbox: HTMLInputElement;
+  transcriptCorrectionHint: HTMLElement;
+  transcriptCorrectionControls: HTMLElement;
+  correctionModelSelect: HTMLSelectElement;
+  refreshCorrectionModelsBtn: HTMLButtonElement;
+  correctionModelHint: HTMLElement;
   autoStopCheckbox: HTMLInputElement;
   silenceTimeoutField: HTMLElement;
   silenceTimeoutInput: HTMLInputElement;
   languageSelect: HTMLSelectElement;
+  targetLanguageSelect: HTMLSelectElement;
   resetDefaultsBtn: HTMLButtonElement;
   appToast: HTMLElement;
   windowMinimizeBtn: HTMLButtonElement | null;
@@ -93,10 +100,17 @@ export function getMainDom(doc: Document): MainDom {
       'input[name="typing-mode"]'
     ) as NodeListOf<HTMLInputElement>,
     typingModeHint: byId<HTMLElement>(doc, "typing-mode-hint"),
+    transcriptCorrectionCheckbox: byId<HTMLInputElement>(doc, "transcript-correction-checkbox"),
+    transcriptCorrectionHint: byId<HTMLElement>(doc, "transcript-correction-hint"),
+    transcriptCorrectionControls: byId<HTMLElement>(doc, "transcript-correction-controls"),
+    correctionModelSelect: byId<HTMLSelectElement>(doc, "correction-model-select"),
+    refreshCorrectionModelsBtn: byId<HTMLButtonElement>(doc, "refresh-correction-models-btn"),
+    correctionModelHint: byId<HTMLElement>(doc, "correction-model-hint"),
     autoStopCheckbox: byId<HTMLInputElement>(doc, "auto-stop-checkbox"),
     silenceTimeoutField: byId<HTMLElement>(doc, "silence-timeout-field"),
     silenceTimeoutInput: byId<HTMLInputElement>(doc, "silence-timeout"),
     languageSelect: byId<HTMLSelectElement>(doc, "language-select"),
+    targetLanguageSelect: byId<HTMLSelectElement>(doc, "target-language-select"),
     resetDefaultsBtn: byId<HTMLButtonElement>(doc, "reset-defaults-btn"),
     appToast: byId<HTMLElement>(doc, "app-toast"),
     windowMinimizeBtn: byIdOptional<HTMLButtonElement>(doc, "window-minimize-btn"),
@@ -121,10 +135,28 @@ export function populateUI(dom: MainDom, settings: Settings) {
   });
   updateTypingModeHint(dom, settings.typingMode);
 
+  dom.transcriptCorrectionCheckbox.checked = settings.transcriptionCorrection.enabled;
+  const correctionModels =
+    settings.transcriptionCorrection.providers[settings.sttProvider].modelCache?.models ?? [];
+  populateCorrectionModelOptions(
+    dom,
+    correctionModels,
+    settings.transcriptionCorrection.providers[settings.sttProvider].selectedModel
+  );
+  if (correctionModels.length === 0) {
+    setCorrectionModelHint(dom, "No cached correction models yet. Click Refresh to load from API.");
+  }
+  updateTranscriptCorrectionUI(
+    dom,
+    settings.typingMode,
+    settings.transcriptionCorrection.enabled
+  );
+
   dom.autoStopCheckbox.checked = settings.autoStopOnSilence;
   dom.silenceTimeoutField.style.display = settings.autoStopOnSilence ? "flex" : "none";
   dom.silenceTimeoutInput.value = String(settings.autoStopSilenceMs / 1000);
   dom.languageSelect.value = settings.language;
+  dom.targetLanguageSelect.value = settings.targetLanguage;
   dom.recordingLoudnessInput.value = String(settings.recordingLoudness);
   dom.recordingLoudnessValue.textContent = `${Math.round(settings.recordingLoudness)}%`;
 }
@@ -138,15 +170,35 @@ export function populateLiveModelOptions(
   models: string[],
   preferredModel: string
 ) {
-  dom.liveModelSelect.innerHTML = "";
+  populateSelectOptions(dom.liveModelSelect, models, preferredModel);
+}
+
+export function setCorrectionModelHint(dom: MainDom, text: string) {
+  dom.correctionModelHint.textContent = text;
+}
+
+export function populateCorrectionModelOptions(
+  dom: MainDom,
+  models: string[],
+  preferredModel: string
+) {
+  populateSelectOptions(dom.correctionModelSelect, models, preferredModel);
+}
+
+function populateSelectOptions(
+  select: HTMLSelectElement,
+  models: string[],
+  preferredModel: string
+) {
+  select.innerHTML = "";
 
   if (models.length === 0) {
     const emptyOption = document.createElement("option");
     emptyOption.value = "";
     emptyOption.textContent = "No models available";
-    dom.liveModelSelect.appendChild(emptyOption);
-    dom.liveModelSelect.value = "";
-    dom.liveModelSelect.disabled = true;
+    select.appendChild(emptyOption);
+    select.value = "";
+    select.disabled = true;
     return;
   }
 
@@ -154,12 +206,12 @@ export function populateLiveModelOptions(
     const option = document.createElement("option");
     option.value = model;
     option.textContent = model;
-    dom.liveModelSelect.appendChild(option);
+    select.appendChild(option);
   }
 
-  dom.liveModelSelect.disabled = false;
+  select.disabled = false;
   const selected = models.includes(preferredModel) ? preferredModel : models[0];
-  dom.liveModelSelect.value = selected;
+  select.value = selected;
 }
 
 export function updateTypingModeHint(dom: MainDom, mode: string) {
@@ -168,6 +220,31 @@ export function updateTypingModeHint(dom: MainDom, mode: string) {
   } else {
     dom.typingModeHint.textContent =
       "Text appears as you speak. May cause issues in some apps.";
+  }
+}
+
+export function updateTranscriptCorrectionUI(
+  dom: MainDom,
+  typingMode: Settings["typingMode"],
+  enabled: boolean
+) {
+  const available = typingMode === "all_at_once";
+  const controlsEnabled = available && enabled;
+
+  dom.transcriptCorrectionCheckbox.disabled = !available;
+  dom.correctionModelSelect.disabled = !controlsEnabled || dom.correctionModelSelect.options.length === 0;
+  dom.refreshCorrectionModelsBtn.disabled = !controlsEnabled;
+  dom.transcriptCorrectionControls.classList.toggle("is-disabled", !controlsEnabled);
+
+  if (!available) {
+    dom.transcriptCorrectionHint.textContent =
+      "AI transcript correction is available only in Type all at once mode.";
+  } else if (!enabled) {
+    dom.transcriptCorrectionHint.textContent =
+      "Beta feature. Enable it to clean up the final transcript before typing.";
+  } else {
+    dom.transcriptCorrectionHint.textContent =
+      "Cleans up the final transcript with a language model before typing. Spoken command words are preserved.";
   }
 }
 

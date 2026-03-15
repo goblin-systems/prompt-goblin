@@ -29,12 +29,27 @@ export interface OpenAIProviderSettings {
   modelCache: ProviderModelCache | null;
 }
 
+export interface CorrectionProviderSettings {
+  selectedModel: string;
+  lastKnownGoodModel: string;
+  modelCache: ProviderModelCache | null;
+}
+
+export interface TranscriptionCorrectionSettings {
+  enabled: boolean;
+  providers: {
+    gemini: CorrectionProviderSettings;
+    openai: CorrectionProviderSettings;
+  };
+}
+
 export interface Settings {
   sttProvider: SttProvider;
   providers: {
     gemini: GeminiProviderSettings;
     openai: OpenAIProviderSettings;
   };
+  transcriptionCorrection: TranscriptionCorrectionSettings;
   hotkey: string;
   microphoneDeviceId: string;
   recordingLoudness: number;
@@ -46,6 +61,7 @@ export interface Settings {
   autoStopOnSilence: boolean;
   autoStopSilenceMs: number;
   language: string;
+  targetLanguage: string;
   textCommandsEnabled: boolean;
   customTextCommands: TextCommand[];
 }
@@ -66,6 +82,21 @@ const DEFAULTS: Settings = {
       modelCache: null,
     },
   },
+  transcriptionCorrection: {
+    enabled: false,
+    providers: {
+      gemini: {
+        selectedModel: "",
+        lastKnownGoodModel: "",
+        modelCache: null,
+      },
+      openai: {
+        selectedModel: "",
+        lastKnownGoodModel: "",
+        modelCache: null,
+      },
+    },
+  },
   hotkey: "Alt+G",
   microphoneDeviceId: "default",
   recordingLoudness: 100,
@@ -77,6 +108,7 @@ const DEFAULTS: Settings = {
   autoStopOnSilence: true,
   autoStopSilenceMs: 4000,
   language: "auto",
+  targetLanguage: "",
   textCommandsEnabled: true,
   customTextCommands: [],
 };
@@ -87,6 +119,13 @@ export function getDefaultSettings(): Settings {
     providers: {
       gemini: { ...DEFAULTS.providers.gemini },
       openai: { ...DEFAULTS.providers.openai },
+    },
+    transcriptionCorrection: {
+      enabled: DEFAULTS.transcriptionCorrection.enabled,
+      providers: {
+        gemini: { ...DEFAULTS.transcriptionCorrection.providers.gemini },
+        openai: { ...DEFAULTS.transcriptionCorrection.providers.openai },
+      },
     },
   };
 }
@@ -130,6 +169,13 @@ function toProviderModelCache(value: unknown): ProviderModelCache | null {
 
 function hydrateSelectedModelFromCache(settings: Settings, provider: SttProvider) {
   const providerSettings = settings.providers[provider];
+  if (!providerSettings.selectedModel && providerSettings.modelCache?.models.length) {
+    providerSettings.selectedModel = providerSettings.modelCache.models[0];
+  }
+}
+
+function hydrateCorrectionSelectedModelFromCache(settings: Settings, provider: SttProvider) {
+  const providerSettings = settings.transcriptionCorrection.providers[provider];
   if (!providerSettings.selectedModel && providerSettings.modelCache?.models.length) {
     providerSettings.selectedModel = providerSettings.modelCache.models[0];
   }
@@ -197,6 +243,36 @@ export async function loadSettings(): Promise<Settings> {
         settings.providers.openai.lastKnownGoodModel = openai.lastKnownGoodModel;
       }
       settings.providers.openai.modelCache = toProviderModelCache(openai.modelCache);
+    }
+  }
+
+  const transcriptionCorrection = await s.get<Settings["transcriptionCorrection"]>(
+    "transcriptionCorrection"
+  );
+  if (transcriptionCorrection && typeof transcriptionCorrection === "object") {
+    if (typeof transcriptionCorrection.enabled === "boolean") {
+      settings.transcriptionCorrection.enabled = transcriptionCorrection.enabled;
+    }
+
+    const providers = transcriptionCorrection.providers;
+    if (providers && typeof providers === "object") {
+      for (const provider of ["gemini", "openai"] as const) {
+        const providerSettings = providers[provider];
+        if (!providerSettings || typeof providerSettings !== "object") {
+          continue;
+        }
+
+        if (typeof providerSettings.selectedModel === "string") {
+          settings.transcriptionCorrection.providers[provider].selectedModel =
+            providerSettings.selectedModel;
+        }
+        if (typeof providerSettings.lastKnownGoodModel === "string") {
+          settings.transcriptionCorrection.providers[provider].lastKnownGoodModel =
+            providerSettings.lastKnownGoodModel;
+        }
+        settings.transcriptionCorrection.providers[provider].modelCache =
+          toProviderModelCache(providerSettings.modelCache);
+      }
     }
   }
 
@@ -273,6 +349,8 @@ export async function loadSettings(): Promise<Settings> {
 
   hydrateSelectedModelFromCache(settings, "gemini");
   hydrateSelectedModelFromCache(settings, "openai");
+  hydrateCorrectionSelectedModelFromCache(settings, "gemini");
+  hydrateCorrectionSelectedModelFromCache(settings, "openai");
 
   if (settings.hotkey === LEGACY_DEFAULT_HOTKEY) {
     settings.hotkey = DEFAULTS.hotkey;
@@ -295,6 +373,11 @@ export async function loadSettings(): Promise<Settings> {
 
   const language = await s.get<string>("language");
   if (language !== undefined && language !== null) settings.language = language;
+
+  const targetLanguage = await s.get<string>("targetLanguage");
+  if (targetLanguage !== undefined && targetLanguage !== null) {
+    settings.targetLanguage = targetLanguage;
+  }
 
   const textCommandsEnabled = await s.get<boolean>("textCommandsEnabled");
   if (textCommandsEnabled !== undefined && textCommandsEnabled !== null) {
@@ -321,6 +404,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   const s = await getStore();
   await s.set("sttProvider", settings.sttProvider);
   await s.set("providers", settings.providers);
+  await s.set("transcriptionCorrection", settings.transcriptionCorrection);
 
   // Backward-compatible writes for legacy keys
   await s.set("geminiApiKey", settings.providers.gemini.apiKey);
@@ -338,6 +422,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("autoStopOnSilence", settings.autoStopOnSilence);
   await s.set("autoStopSilenceMs", settings.autoStopSilenceMs);
   await s.set("language", settings.language);
+  await s.set("targetLanguage", settings.targetLanguage);
   await s.set("textCommandsEnabled", settings.textCommandsEnabled);
   await s.set("customTextCommands", settings.customTextCommands);
   await s.set("textCommands", [...DEFAULT_TEXT_COMMANDS, ...settings.customTextCommands]);
@@ -375,6 +460,38 @@ export async function saveProviderLastKnownGoodModel(
   if (provider === "gemini") {
     await s.set("lastKnownGoodLiveModel", model);
   }
+  await s.save();
+}
+
+export async function saveCorrectionProviderModelCache(
+  provider: SttProvider,
+  cache: ProviderModelCache | null
+): Promise<void> {
+  const s = await getStore();
+  const transcriptionCorrection =
+    (await s.get<Settings["transcriptionCorrection"]>("transcriptionCorrection")) ??
+    getDefaultSettings().transcriptionCorrection;
+  transcriptionCorrection.providers[provider] = {
+    ...transcriptionCorrection.providers[provider],
+    modelCache: cache,
+  };
+  await s.set("transcriptionCorrection", transcriptionCorrection);
+  await s.save();
+}
+
+export async function saveCorrectionProviderLastKnownGoodModel(
+  provider: SttProvider,
+  model: string
+): Promise<void> {
+  const s = await getStore();
+  const transcriptionCorrection =
+    (await s.get<Settings["transcriptionCorrection"]>("transcriptionCorrection")) ??
+    getDefaultSettings().transcriptionCorrection;
+  transcriptionCorrection.providers[provider] = {
+    ...transcriptionCorrection.providers[provider],
+    lastKnownGoodModel: model,
+  };
+  await s.set("transcriptionCorrection", transcriptionCorrection);
   await s.save();
 }
 

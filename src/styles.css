@@ -451,6 +451,23 @@ input[type="checkbox"] {
   font-size: 13px;
 }
 
+.language-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.language-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.language-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .unit {
   color: var(--text-muted);
   font-size: 12px;
@@ -461,6 +478,16 @@ input[type="checkbox"] {
   font-size: 12px;
   color: var(--text-muted);
   line-height: 1.4;
+}
+
+#transcript-correction-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#transcript-correction-controls.is-disabled {
+  opacity: 0.55;
 }
 
 /* ── Footer ───────────────────────────────────────────────── */
@@ -512,6 +539,10 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 640px) {
+  .language-grid {
+    grid-template-columns: 1fr;
+  }
+
   .app-toast {
     left: 12px;
     right: 12px;

@@ -209,6 +209,31 @@
       </section>
 
       <section class="settings-section">
+        <div class="section-heading-row">
+          <h2>Transcript Correction</h2>
+          <span class="badge beta">beta</span>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="transcript-correction-checkbox" />
+          <span>Enable AI transcript correction</span>
+        </label>
+        <p class="hint" id="transcript-correction-hint">
+          Cleans up the final transcript with a language model before typing. Works only in Type all at once mode.
+        </p>
+        <div id="transcript-correction-controls">
+          <div class="field">
+            <select id="correction-model-select"></select>
+            <button id="refresh-correction-models-btn" class="secondary-btn" type="button">
+              Refresh
+            </button>
+          </div>
+          <p class="hint" id="correction-model-hint">
+            Choose a language model used only for transcript correction.
+          </p>
+        </div>
+      </section>
+
+      <section class="settings-section">
         <h2>Voice Detection</h2>
         <label class="checkbox-label">
           <input type="checkbox" id="auto-stop-checkbox" checked />
@@ -230,25 +255,54 @@
       </section>
 
       <section class="settings-section">
-        <h2>Language</h2>
-        <select id="language-select">
-          <option value="auto">Auto-detect</option>
-          <option value="en">English</option>
-          <option value="es">Spanish</option>
-          <option value="fr">French</option>
-          <option value="de">German</option>
-          <option value="it">Italian</option>
-          <option value="pt">Portuguese</option>
-          <option value="ru">Russian</option>
-          <option value="zh">Chinese</option>
-          <option value="ja">Japanese</option>
-          <option value="ko">Korean</option>
-          <option value="ar">Arabic</option>
-          <option value="hi">Hindi</option>
-          <option value="nl">Dutch</option>
-          <option value="pl">Polish</option>
-          <option value="uk">Ukrainian</option>
-        </select>
+        <h2>Languages</h2>
+        <div class="language-grid">
+          <div class="language-field">
+            <label for="language-select">Source language</label>
+            <select id="language-select">
+              <option value="auto">Auto-detect</option>
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ru">Russian</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="ar">Arabic</option>
+              <option value="hi">Hindi</option>
+              <option value="nl">Dutch</option>
+              <option value="pl">Polish</option>
+              <option value="uk">Ukrainian</option>
+            </select>
+          </div>
+          <div class="language-field">
+            <label for="target-language-select">Target language</label>
+            <select id="target-language-select">
+              <option value="">Keep original</option>
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="ru">Russian</option>
+              <option value="zh">Chinese</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="ar">Arabic</option>
+              <option value="hi">Hindi</option>
+              <option value="nl">Dutch</option>
+              <option value="pl">Polish</option>
+              <option value="uk">Ukrainian</option>
+            </select>
+          </div>
+        </div>
+        <p class="hint">
+          Source language is used for transcription. If target language is set, transcript correction translates the final all-at-once output into that language.
+        </p>
       </section>
 
       <footer class="settings-footer">

@@ -8,10 +8,18 @@ import {
 } from "@tauri-apps/plugin-global-shortcut";
 import {
   loadSettings,
+  saveCorrectionProviderLastKnownGoodModel,
   saveProviderLastKnownGoodModel,
   type Settings,
 } from "./settings";
 import { debugLog, isDebugLoggingEnabled } from "./logger";
+import {
+  getCorrectionFallbackModels,
+  getCorrectionLabel,
+  getCorrectionRuntime,
+  getCorrectionSelectedModel,
+  isTranscriptionCorrectionEnabled,
+} from "./correction/service";
 import {
   createLiveTranscriber,
   getProviderApiKey,
@@ -198,8 +206,117 @@ function emitHudUpdate(force = false) {
   });
 }
 
+function emitOverlayHudModel(provider: string, model: string) {
+  void emitOverlayEvent("recording-hud-update", {
+    provider,
+    model,
+    latencyMs: computeHudLatencyMs(),
+    confidencePct: estimatedConfidencePct,
+    confidenceMode: "estimated",
+    debugEnabled: isDebugLoggingEnabled(),
+    waveformStyle: settings.waveformStyle,
+    waveformColorScheme: settings.waveformColorScheme,
+  });
+}
+
 function processFinalTranscriptForTyping(text: string): string {
   return applyTextCommands(text, settings).trim();
+}
+
+function buildModelCandidates(preferredModel: string, fallbackModels: string[]): string[] {
+  const unique = new Set<string>();
+  for (const model of [preferredModel, ...fallbackModels]) {
+    const normalized = model.trim();
+    if (normalized) {
+      unique.add(normalized);
+    }
+  }
+  return Array.from(unique);
+}
+
+async function maybeCorrectFinalTranscript(text: string): Promise<string> {
+  if (!text || settings.typingMode !== "all_at_once" || !isTranscriptionCorrectionEnabled(settings)) {
+    return text;
+  }
+
+  const apiKey = getProviderApiKey(settings);
+  const correctionModel = getCorrectionSelectedModel(settings);
+  if (!apiKey || !correctionModel) {
+    return text;
+  }
+
+  const provider = settings.sttProvider;
+  const runtime = getCorrectionRuntime(provider);
+  const candidates = buildModelCandidates(correctionModel, getCorrectionFallbackModels(settings));
+  let lastError: unknown = null;
+
+  void emitOverlayProcessingState(getOverlayCorrectionLabel());
+
+  debugLog(
+    `Starting transcript correction with ${runtime.label} (${candidates.length} candidate model${candidates.length === 1 ? "" : "s"})`,
+    "INFO"
+  );
+
+  for (const candidate of candidates) {
+    try {
+      const corrected = (
+        await runtime.correctText(
+          apiKey,
+          candidate,
+          text,
+          settings.language,
+          settings.targetLanguage
+        )
+      ).trim();
+      if (!corrected) {
+        continue;
+      }
+
+      settings.transcriptionCorrection.providers[provider].lastKnownGoodModel = candidate;
+      saveCorrectionProviderLastKnownGoodModel(provider, candidate).catch(() => {
+        // ignore best-effort cache update failures
+      });
+      debugLog(`Transcript correction succeeded with ${runtime.label} model '${candidate}'`, "INFO");
+      return corrected;
+    } catch (err) {
+      lastError = err;
+      debugLog(
+        `Transcript correction failed with ${runtime.label} model '${candidate}': ${String(err)}`,
+        "WARN"
+      );
+    }
+  }
+
+  if (lastError) {
+    debugLog(`Transcript correction skipped after failure: ${String(lastError)}`, "WARN");
+  }
+  return text;
+}
+
+function shouldShowTranslationLabel(): boolean {
+  return Boolean(
+    settings.targetLanguage &&
+      settings.targetLanguage !== "auto" &&
+      settings.language !== "auto" &&
+      settings.targetLanguage !== settings.language
+  );
+}
+
+function getOverlayCorrectionLabel(): string {
+  return shouldShowTranslationLabel() ? "Correcting and Translating..." : "Correcting...";
+}
+
+function emitOverlayProcessingState(label: string): Promise<void> {
+  if (label.startsWith("Correcting")) {
+    emitOverlayHudModel(getCorrectionLabel(settings.sttProvider), getCorrectionSelectedModel(settings));
+  } else {
+    emitOverlayHudModel(providerLabelForLogs(), transcriber.getActiveModel());
+  }
+
+  return emitOverlayEvent("recording-phase", {
+    state: label.startsWith("Correcting") ? "correcting" : "transcribing",
+    label,
+  });
 }
 
 function processIncrementalTranscriptForTyping(text: string, isFinal: boolean): string {
@@ -518,6 +635,8 @@ async function stopRecording() {
   }
 
   // Stop audio capture
+  await emitOverlayProcessingState("Transcribing...");
+
   try {
     await invoke("stop_recording");
     debugLog("Recording stopped", "INFO");
@@ -531,7 +650,8 @@ async function stopRecording() {
 
   // Type the final text (all-at-once mode)
   const finalRawText = transcriber.getTranscript().trim();
-  const finalText = processFinalTranscriptForTyping(finalRawText);
+  const correctedRawText = await maybeCorrectFinalTranscript(finalRawText);
+  const finalText = processFinalTranscriptForTyping(correctedRawText);
   debugLog(
     `Stopping recording summary: duration=${durationMs}ms, chunks=${recordingChunkCount}, ~audioBytes=${recordingApproxAudioBytes}, transcriptChars=${finalText.length}, typedCalls=${incrementalTypeCallCount}, typedChars=${incrementalTypeCharCount}, typeFailures=${incrementalTypeFailureCount}, turnBoundaries=${audioTurnBoundaryCount}, recoveryAttempts=${recoveryAttemptCount}, recoverySuccess=${recoverySuccessCount}, recoveryFailures=${recoveryFailureCount}`,
     "INFO"

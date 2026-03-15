@@ -35,6 +35,7 @@ const overlayWaveCanvas = document.getElementById(
 ) as HTMLCanvasElement;
 const recordingDot = document.getElementById("recording-dot") as HTMLElement;
 const overlayHud = document.getElementById("overlay-hud") as HTMLElement;
+const overlayHudModel = document.getElementById("overlay-hud-model") as HTMLElement;
 const overlayHudLatency = document.getElementById("overlay-hud-latency") as HTMLElement;
 const overlayHudConfidence = document.getElementById("overlay-hud-confidence") as HTMLElement;
 let showDebugHud = false;
@@ -65,9 +66,17 @@ function stopTimer() {
   }
 }
 
-function setOverlayState(state: "loading" | "listening" | "done") {
-  recordingDot.classList.remove("loading", "listening", "done");
+function setOverlayState(
+  state: "loading" | "listening" | "transcribing" | "correcting" | "done",
+  customLabel?: string
+) {
+  recordingDot.classList.remove("loading", "listening", "transcribing", "correcting", "done");
   recordingDot.classList.add(state);
+
+  if (customLabel) {
+    overlayLabel.textContent = customLabel;
+    return;
+  }
 
   if (state === "loading") {
     overlayLabel.textContent = "Loading...";
@@ -76,6 +85,16 @@ function setOverlayState(state: "loading" | "listening" | "done") {
 
   if (state === "listening") {
     overlayLabel.textContent = "Listening...";
+    return;
+  }
+
+  if (state === "transcribing") {
+    overlayLabel.textContent = "Transcribing...";
+    return;
+  }
+
+  if (state === "correcting") {
+    overlayLabel.textContent = "Correcting...";
     return;
   }
 
@@ -111,10 +130,26 @@ function setHudVisibility() {
 }
 
 function resetHud() {
+  overlayHudModel.textContent = "Model --";
   overlayHudLatency.textContent = "Latency --";
   overlayHudConfidence.textContent = "Confidence --";
   overlayHud.removeAttribute("title");
   setHudVisibility();
+}
+
+function formatHudModel(provider: string | null | undefined, model: string | null | undefined): string {
+  const normalizedProvider = provider?.trim() ?? "";
+  const normalizedModel = model?.trim() ?? "";
+  if (!normalizedProvider && !normalizedModel) {
+    return "Model --";
+  }
+  if (!normalizedProvider) {
+    return normalizedModel;
+  }
+  if (!normalizedModel) {
+    return normalizedProvider;
+  }
+  return `${normalizedProvider}: ${normalizedModel}`;
 }
 
 function setupOverlayWave() {
@@ -229,6 +264,24 @@ listen("recording-ready", () => {
   }, LISTENING_READY_DELAY_MS);
 });
 
+listen<{
+  state?: "transcribing" | "correcting";
+  label?: string;
+}>("recording-phase", (event) => {
+  if (!overlayRecordingActive) {
+    return;
+  }
+
+  if (listeningDelayTimer) {
+    clearTimeout(listeningDelayTimer);
+    listeningDelayTimer = null;
+  }
+
+  if (event.payload?.state) {
+    setOverlayState(event.payload.state, event.payload.label);
+  }
+});
+
 listen("recording-stopped", () => {
   if (listeningDelayTimer) {
     clearTimeout(listeningDelayTimer);
@@ -280,6 +333,7 @@ listen<{
 
   const provider = event.payload.provider?.trim() ?? "";
   const model = event.payload.model?.trim() ?? "";
+  overlayHudModel.textContent = formatHudModel(provider, model);
   if (provider || model) {
     overlayHud.title = `${provider}${provider && model ? " - " : ""}${model}`;
   }
