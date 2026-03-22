@@ -1,12 +1,14 @@
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  applyIcons,
   drawWaveform,
   isWaveformColorScheme,
   isWaveformStyle,
+  setupContextMenuGuard,
   type WaveformColorScheme,
   type WaveformStyle,
-} from "./waveform-styles";
+} from "@goblin-systems/goblin-design-system";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 let timerInterval: ReturnType<typeof setInterval> | null = null;
 let startTime = 0;
@@ -18,8 +20,14 @@ let wavePhase = 0;
 let listeningDelayTimer: ReturnType<typeof setTimeout> | null = null;
 let currentWaveformStyle: WaveformStyle = "classic";
 let currentWaveformColorScheme: WaveformColorScheme = "aurora";
+let playListeningDing = true;
+let listeningDingSound: "chime" | "soft" | "digital" = "chime";
+let listeningDingVolume = 60;
+let currentOverlayState: "loading" | "listening" | "transcribing" | "correcting" | "done" =
+  "done";
+let dingAudioContext: AudioContext | null = null;
 
-const LISTENING_READY_DELAY_MS = 1000;
+const LISTENING_READY_DELAY_MS = 200;
 
 const MIC_ACTIVITY_RMS_THRESHOLD = 0.01;
 const OVERLAY_WAVE_INPUT_GAIN = 18;
@@ -47,9 +55,8 @@ function hideTranscriptPreview() {
   overlayTranscript.classList.remove("visible");
 }
 
-window.addEventListener("contextmenu", (event) => {
-  event.preventDefault();
-});
+applyIcons();
+setupContextMenuGuard();
 
 overlayPill.addEventListener("mousedown", (event) => {
   if (event.button !== 0) {
@@ -85,8 +92,15 @@ function setOverlayState(
   state: "loading" | "listening" | "transcribing" | "correcting" | "done",
   customLabel?: string
 ) {
+  const enteredListening = currentOverlayState !== "listening" && state === "listening";
+  currentOverlayState = state;
+
   recordingDot.classList.remove("loading", "listening", "transcribing", "correcting", "done");
   recordingDot.classList.add(state);
+
+  if (enteredListening && playListeningDing) {
+    playListeningStartDing();
+  }
 
   if (customLabel) {
     overlayLabel.textContent = customLabel;
@@ -114,6 +128,123 @@ function setOverlayState(
   }
 
   overlayLabel.textContent = "Done";
+}
+
+function getDingAudioContext(): AudioContext | null {
+  if (dingAudioContext) {
+    return dingAudioContext;
+  }
+
+  const AudioContextCtor =
+    window.AudioContext ??
+    ((window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ?? null);
+
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  dingAudioContext = new AudioContextCtor();
+  return dingAudioContext;
+}
+
+function playListeningStartDing() {
+  const audioCtx = getDingAudioContext();
+  if (!audioCtx) {
+    return;
+  }
+
+  const volume = Math.min(1, Math.max(0, listeningDingVolume / 100));
+  if (volume <= 0) {
+    return;
+  }
+
+  const start = () => {
+    const now = audioCtx.currentTime;
+
+    if (listeningDingSound === "digital") {
+      playTone(audioCtx, {
+        wave: "square",
+        at: now,
+        duration: 0.06,
+        startHz: 880,
+        endHz: 988,
+        peakGain: 0.09 * volume,
+      });
+      playTone(audioCtx, {
+        wave: "square",
+        at: now + 0.075,
+        duration: 0.07,
+        startHz: 1174,
+        endHz: 1318,
+        peakGain: 0.11 * volume,
+      });
+      return;
+    }
+
+    if (listeningDingSound === "soft") {
+      playTone(audioCtx, {
+        wave: "triangle",
+        at: now,
+        duration: 0.14,
+        startHz: 740,
+        endHz: 880,
+        peakGain: 0.12 * volume,
+      });
+      return;
+    }
+
+    playTone(audioCtx, {
+      wave: "sine",
+      at: now,
+      duration: 0.12,
+      startHz: 1046,
+      endHz: 1318,
+      peakGain: 0.16 * volume,
+    });
+  };
+
+  if (audioCtx.state === "suspended") {
+    audioCtx
+      .resume()
+      .then(start)
+      .catch(() => {
+        // best-effort cue
+      });
+    return;
+  }
+
+  start();
+}
+
+function playTone(
+  audioCtx: AudioContext,
+  options: {
+    wave: OscillatorType;
+    at: number;
+    duration: number;
+    startHz: number;
+    endHz: number;
+    peakGain: number;
+  }
+) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc.type = options.wave;
+  osc.frequency.setValueAtTime(options.startHz, options.at);
+  osc.frequency.exponentialRampToValueAtTime(options.endHz, options.at + options.duration);
+
+  gain.gain.setValueAtTime(0.0001, options.at);
+  gain.gain.exponentialRampToValueAtTime(
+    Math.max(0.00011, options.peakGain),
+    options.at + 0.01
+  );
+  gain.gain.exponentialRampToValueAtTime(0.0001, options.at + options.duration);
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(options.at);
+  osc.stop(options.at + options.duration);
 }
 
 function formatHudLatency(latencyMs: number | null | undefined): string {
@@ -238,6 +369,9 @@ resetHud();
 // Listen for recording events from the main window
 listen<{
   state?: "loading" | "listening";
+  playListeningDing?: boolean;
+  listeningDingSound?: string;
+  listeningDingVolume?: number;
   waveformStyle?: string;
   waveformColorScheme?: string;
 }>("recording-started", (event) => {
@@ -251,6 +385,19 @@ listen<{
   }
   if (isWaveformColorScheme(event.payload?.waveformColorScheme)) {
     currentWaveformColorScheme = event.payload.waveformColorScheme;
+  }
+  if (typeof event.payload?.playListeningDing === "boolean") {
+    playListeningDing = event.payload.playListeningDing;
+  }
+  if (
+    event.payload?.listeningDingSound === "chime" ||
+    event.payload?.listeningDingSound === "soft" ||
+    event.payload?.listeningDingSound === "digital"
+  ) {
+    listeningDingSound = event.payload.listeningDingSound;
+  }
+  if (typeof event.payload?.listeningDingVolume === "number") {
+    listeningDingVolume = Math.max(0, Math.min(100, event.payload.listeningDingVolume));
   }
 
   overlayRecordingActive = true;
@@ -312,9 +459,28 @@ listen("recording-stopped", () => {
   stopTimer();
 });
 
-listen<{ waveformStyle?: string; waveformColorScheme?: string }>(
+listen<{
+  playListeningDing?: boolean;
+  listeningDingSound?: string;
+  listeningDingVolume?: number;
+  waveformStyle?: string;
+  waveformColorScheme?: string;
+}>(
   "overlay-settings-updated",
   (event) => {
+  if (typeof event.payload.playListeningDing === "boolean") {
+    playListeningDing = event.payload.playListeningDing;
+  }
+  if (
+    event.payload.listeningDingSound === "chime" ||
+    event.payload.listeningDingSound === "soft" ||
+    event.payload.listeningDingSound === "digital"
+  ) {
+    listeningDingSound = event.payload.listeningDingSound;
+  }
+  if (typeof event.payload.listeningDingVolume === "number") {
+    listeningDingVolume = Math.max(0, Math.min(100, event.payload.listeningDingVolume));
+  }
   if (isWaveformStyle(event.payload.waveformStyle)) {
     currentWaveformStyle = event.payload.waveformStyle;
   }

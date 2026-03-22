@@ -563,6 +563,9 @@ async function startRecording() {
       await overlay.show();
       await overlay.emit("recording-started", {
         state: "loading",
+        playListeningDing: settings.playListeningDing,
+        listeningDingSound: settings.listeningDingSound,
+        listeningDingVolume: settings.listeningDingVolume,
         waveformStyle: settings.waveformStyle,
         waveformColorScheme: settings.waveformColorScheme,
       });
@@ -937,6 +940,9 @@ export function reloadSettings(newSettings: Settings) {
   settings = newSettings;
 
   void emitOverlayEvent("overlay-settings-updated", {
+    playListeningDing: settings.playListeningDing,
+    listeningDingSound: settings.listeningDingSound,
+    listeningDingVolume: settings.listeningDingVolume,
     waveformStyle: settings.waveformStyle,
     waveformColorScheme: settings.waveformColorScheme,
   });

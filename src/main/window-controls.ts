@@ -1,3 +1,9 @@
+import {
+  closeModal,
+  createIcon,
+  openModal,
+  setupContextMenuGuard,
+} from "@goblin-systems/goblin-design-system";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { MainDom } from "./dom";
 
@@ -7,9 +13,7 @@ export interface WindowControlsOptions {
 }
 
 export function setupGlobalInteractionGuards() {
-  window.addEventListener("contextmenu", (event) => {
-    event.preventDefault();
-  });
+  setupContextMenuGuard();
 
   window.addEventListener("keydown", (event) => {
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
@@ -22,17 +26,24 @@ export function setupWindowAndModalControls(options: WindowControlsOptions) {
   const { dom, onBeforeUnload } = options;
 
   dom.toggleKeyBtn.addEventListener("click", () => {
-    dom.apiKeyInput.type = dom.apiKeyInput.type === "password" ? "text" : "password";
+    const showingKey = dom.apiKeyInput.type === "text";
+    dom.apiKeyInput.type = showingKey ? "password" : "text";
+    const icon = createIcon(showingKey ? "eye" : "eye-off");
+    if (icon) {
+      dom.toggleKeyBtn.replaceChildren(icon);
+    }
   });
 
   const openApiKeyHelpModal = () => {
-    dom.apiKeyHelpModal.removeAttribute("hidden");
-    document.body.classList.add("modal-open");
+    openModal({
+      backdrop: dom.apiKeyHelpModal,
+    });
   };
 
   const closeApiKeyHelpModal = () => {
-    dom.apiKeyHelpModal.setAttribute("hidden", "");
-    document.body.classList.remove("modal-open");
+    closeModal({
+      backdrop: dom.apiKeyHelpModal,
+    });
   };
 
   dom.apiKeyHelpBtn.addEventListener("click", openApiKeyHelpModal);

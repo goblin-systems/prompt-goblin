@@ -23,6 +23,9 @@ function createForm(overrides: Partial<SettingsFormSnapshot> = {}): SettingsForm
     language: "en",
     targetLanguage: "de",
     lineBreakMode: "ctrl_enter",
+    playListeningDing: false,
+    listeningDingSound: "digital",
+    listeningDingVolumePercent: "35",
     ...overrides,
   };
 }
@@ -47,21 +50,30 @@ describe("settings controller helpers", () => {
     expect(nextSettings.recordingLoudness).toBe(175);
     expect(nextSettings.autoStopSilenceMs).toBe(5500);
     expect(nextSettings.lineBreakMode).toBe("ctrl_enter");
+    expect(nextSettings.playListeningDing).toBe(false);
+    expect(nextSettings.listeningDingSound).toBe("digital");
+    expect(nextSettings.listeningDingVolume).toBe(35);
   });
 
   test("buildSettingsFromForm falls back to current values for invalid numeric input", () => {
     const currentSettings = getDefaultSettings();
     currentSettings.recordingLoudness = 140;
     currentSettings.autoStopSilenceMs = 3200;
+    currentSettings.listeningDingVolume = 72;
 
     const nextSettings = buildSettingsFromForm(
       currentSettings,
       "gemini",
-      createForm({ recordingLoudnessPercent: "999", silenceTimeoutSeconds: "0" })
+      createForm({
+        recordingLoudnessPercent: "999",
+        silenceTimeoutSeconds: "0",
+        listeningDingVolumePercent: "200",
+      })
     );
 
     expect(nextSettings.recordingLoudness).toBe(140);
     expect(nextSettings.autoStopSilenceMs).toBe(3200);
+    expect(nextSettings.listeningDingVolume).toBe(72);
   });
 
   test("formatRecordingLoudnessValue and getRecordingInputGain normalize display and gain", () => {

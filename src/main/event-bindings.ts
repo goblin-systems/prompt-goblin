@@ -13,6 +13,8 @@ export interface EventBindingOptions {
   updateTypingModeHint: () => void;
   updateTranscriptCorrectionUI: () => void;
   updateRecordingLoudnessValue: () => void;
+  updateListeningDingVolumeValue: () => void;
+  previewListeningDing: () => void;
   updateWaveToolButtons: () => void;
   refreshLiveModelList: (forceApiRefresh: boolean) => Promise<void>;
   refreshCorrectionModelList: (forceApiRefresh: boolean) => Promise<void>;
@@ -34,6 +36,8 @@ export function setupMainEventBindings(options: EventBindingOptions) {
     updateTypingModeHint,
     updateTranscriptCorrectionUI,
     updateRecordingLoudnessValue,
+    updateListeningDingVolumeValue,
+    previewListeningDing,
     updateWaveToolButtons,
     refreshLiveModelList,
     refreshCorrectionModelList,
@@ -68,6 +72,14 @@ export function setupMainEventBindings(options: EventBindingOptions) {
     settingsController.scheduleAutosave(0);
   });
 
+  const applyListeningDingControlState = () => {
+    const enabled = dom.listeningDingCheckbox.checked;
+    dom.listeningDingSoundSelect.disabled = !enabled;
+    dom.listeningDingVolumeInput.disabled = !enabled;
+  };
+
+  applyListeningDingControlState();
+
   dom.resetDefaultsBtn.addEventListener("click", async () => {
     await handleResetDefaults();
   });
@@ -101,6 +113,22 @@ export function setupMainEventBindings(options: EventBindingOptions) {
   dom.languageSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
   dom.targetLanguageSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
   dom.lineBreakModeSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
+  dom.listeningDingCheckbox.addEventListener("change", () => {
+    applyListeningDingControlState();
+    if (dom.listeningDingCheckbox.checked) {
+      previewListeningDing();
+    }
+    settingsController.scheduleAutosave(0);
+  });
+  dom.listeningDingSoundSelect.addEventListener("change", () => {
+    previewListeningDing();
+    settingsController.scheduleAutosave(0);
+  });
+  dom.listeningDingVolumeInput.addEventListener("input", () => {
+    updateListeningDingVolumeValue();
+    previewListeningDing();
+    settingsController.scheduleAutosave();
+  });
 
   dom.refreshMicrophonesBtn.addEventListener("click", async () => {
     await refreshMicrophoneList(dom.microphoneSelect.value || "default");

@@ -1,3 +1,11 @@
+import {
+  applyIcons,
+  showToast,
+  cycleWaveformColorScheme,
+  cycleWaveformStyle,
+  getWaveformColorSchemeLabel,
+  getWaveformStyleLabel,
+} from "@goblin-systems/goblin-design-system";
 import { initApp } from "./app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -49,23 +57,18 @@ import {
   saveCorrectionProviderModelCache,
   saveProviderLastKnownGoodModel,
   saveProviderModelCache,
+  type ListeningDingSound,
   type Settings,
   type SttProvider,
 } from "./settings";
 import { getProviderLabel, getProviderRuntime } from "./stt/service";
-import {
-  cycleWaveformColorScheme,
-  cycleWaveformStyle,
-  getWaveformColorSchemeLabel,
-  getWaveformStyleLabel,
-} from "./waveform-styles";
 
 let currentSettings: Settings;
-let saveStatusTimer: number | null = null;
 let dom: MainDom;
 let settingsController: SettingsController;
 let micTestController: MicTestController;
 let apiKeyController: ApiKeyController;
+let dingPreviewAudioContext: AudioContext | null = null;
 
 function getActiveProvider(): SttProvider {
   return dom.sttProviderSelect.value === "openai" ? "openai" : "gemini";
@@ -155,6 +158,9 @@ function readFormSnapshot(): SettingsFormSnapshot {
     language: dom.languageSelect.value,
     targetLanguage: dom.targetLanguageSelect.value,
     lineBreakMode: dom.lineBreakModeSelect.value as Settings["lineBreakMode"],
+    playListeningDing: dom.listeningDingCheckbox.checked,
+    listeningDingSound: dom.listeningDingSoundSelect.value as Settings["listeningDingSound"],
+    listeningDingVolumePercent: dom.listeningDingVolumeInput.value,
   };
 }
 
@@ -162,6 +168,133 @@ function updateRecordingLoudnessValue() {
   dom.recordingLoudnessValue.textContent = formatRecordingLoudnessValue(
     dom.recordingLoudnessInput.value
   );
+}
+
+function updateListeningDingVolumeValue() {
+  const volume = Number.parseFloat(dom.listeningDingVolumeInput.value);
+  dom.listeningDingVolumeValue.textContent = Number.isFinite(volume)
+    ? `${Math.round(volume)}%`
+    : "60%";
+}
+
+function getDingPreviewAudioContext(): AudioContext | null {
+  if (dingPreviewAudioContext) {
+    return dingPreviewAudioContext;
+  }
+
+  const AudioContextCtor =
+    window.AudioContext ??
+    ((window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext ?? null);
+
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  dingPreviewAudioContext = new AudioContextCtor();
+  return dingPreviewAudioContext;
+}
+
+function playDingTone(
+  audioCtx: AudioContext,
+  options: {
+    wave: OscillatorType;
+    at: number;
+    duration: number;
+    startHz: number;
+    endHz: number;
+    peakGain: number;
+  }
+) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+
+  osc.type = options.wave;
+  osc.frequency.setValueAtTime(options.startHz, options.at);
+  osc.frequency.exponentialRampToValueAtTime(options.endHz, options.at + options.duration);
+
+  gain.gain.setValueAtTime(0.0001, options.at);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.00011, options.peakGain), options.at + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, options.at + options.duration);
+
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start(options.at);
+  osc.stop(options.at + options.duration);
+}
+
+function previewListeningDing() {
+  if (!dom.listeningDingCheckbox.checked) {
+    return;
+  }
+
+  const audioCtx = getDingPreviewAudioContext();
+  if (!audioCtx) {
+    return;
+  }
+
+  const sound = dom.listeningDingSoundSelect.value as ListeningDingSound;
+  const volumePercent = Number.parseFloat(dom.listeningDingVolumeInput.value);
+  const volume = Number.isFinite(volumePercent)
+    ? Math.min(1, Math.max(0, volumePercent / 100))
+    : 0.6;
+
+  if (volume <= 0) {
+    return;
+  }
+
+  const start = () => {
+    const now = audioCtx.currentTime;
+
+    if (sound === "digital") {
+      playDingTone(audioCtx, {
+        wave: "square",
+        at: now,
+        duration: 0.06,
+        startHz: 880,
+        endHz: 988,
+        peakGain: 0.09 * volume,
+      });
+      playDingTone(audioCtx, {
+        wave: "square",
+        at: now + 0.075,
+        duration: 0.07,
+        startHz: 1174,
+        endHz: 1318,
+        peakGain: 0.11 * volume,
+      });
+      return;
+    }
+
+    if (sound === "soft") {
+      playDingTone(audioCtx, {
+        wave: "triangle",
+        at: now,
+        duration: 0.14,
+        startHz: 740,
+        endHz: 880,
+        peakGain: 0.12 * volume,
+      });
+      return;
+    }
+
+    playDingTone(audioCtx, {
+      wave: "sine",
+      at: now,
+      duration: 0.12,
+      startHz: 1046,
+      endHz: 1318,
+      peakGain: 0.16 * volume,
+    });
+  };
+
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume().then(start).catch(() => {
+      // best-effort preview
+    });
+    return;
+  }
+
+  start();
 }
 
 function updateWaveToolButtons() {
@@ -183,6 +316,7 @@ function updateWaveToolButtons() {
 function populateUI(settings: Settings) {
   renderUI(dom, settings);
   updateRecordingLoudnessValue();
+  updateListeningDingVolumeValue();
   updateTypingModeHint();
   updateWaveToolButtons();
   updateTranscriptCorrectionUI();
@@ -200,18 +334,7 @@ function updateDebugLogHint() {
 }
 
 function showSaveStatus(message: string, isError = false, durationMs?: number) {
-  if (saveStatusTimer !== null) {
-    window.clearTimeout(saveStatusTimer);
-  }
-
-  dom.appToast.textContent = message;
-  dom.appToast.classList.remove("error", "success");
-  dom.appToast.classList.add(isError ? "error" : "success", "visible");
-
-  saveStatusTimer = window.setTimeout(() => {
-    dom.appToast.classList.remove("visible", "error", "success");
-    saveStatusTimer = null;
-  }, durationMs ?? (isError ? 3000 : 1500));
+  showToast(message, isError ? "error" : "success", durationMs ?? (isError ? 3000 : 1500));
 }
 
 async function refreshLiveModelList(forceApiRefresh: boolean) {
@@ -328,6 +451,7 @@ async function restartMicTestIfNeeded() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  applyIcons();
   dom = getMainDom(document);
   micTestController = new MicTestController({
     dom,
@@ -400,6 +524,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     updateTypingModeHint,
     updateTranscriptCorrectionUI,
     updateRecordingLoudnessValue,
+    updateListeningDingVolumeValue,
+    previewListeningDing,
     updateWaveToolButtons,
     refreshLiveModelList,
     refreshCorrectionModelList,

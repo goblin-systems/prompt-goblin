@@ -13,9 +13,12 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <main class="settings-container">
-      <div class="window-frame-row" data-tauri-drag-region>
-        <div class="window-title">Prompt Goblin</div>
+    <main class="app-shell settings-shell">
+      <div class="window-frame-row settings-titlebar" data-tauri-drag-region>
+        <div class="window-title-wrap">
+          <div class="window-title">Prompt Goblin</div>
+          <div class="window-subtitle">Speech control settings</div>
+        </div>
         <div class="window-actions" aria-label="Window controls">
           <button
             id="window-close-btn"
@@ -24,297 +27,331 @@
             title="Close"
             aria-label="Close window"
           >
-            &times;
+            <i data-lucide="x"></i>
           </button>
         </div>
       </div>
 
-      <section class="settings-section">
-        <h2>Speech Provider</h2>
-        <div class="field">
-          <select id="stt-provider-select">
-            <option value="gemini">Gemini</option>
-            <option value="openai">OpenAI</option>
-          </select>
-        </div>
-        <p class="hint">Choose the transcription backend used for recording and mic test.</p>
-      </section>
-
-      <section class="settings-section">
-        <div class="section-heading-row">
-          <h2>API KEY</h2>
-          <button
-            id="api-key-help-btn"
-            class="icon-btn help-btn"
-            type="button"
-            title="How to get an API key"
-            aria-label="How to get an API key"
-          >
-            ?
-          </button>
-        </div>
-        <div class="field">
-          <input
-            type="password"
-            id="api-key-input"
-            placeholder="Paste your API key..."
-            spellcheck="false"
-            autocomplete="off"
-          />
-          <button id="toggle-key-visibility" class="icon-btn" title="Toggle visibility">
-            <span id="eye-icon">&#x1F441;</span>
-          </button>
-        </div>
-        <div class="status-row">
-          <span id="connection-status" class="status-indicator disconnected">
-            <span class="status-dot"></span>
-            <span class="status-text">Not configured</span>
-          </span>
-          <button id="test-api-key-btn" class="secondary-btn" type="button">
-            Test
-          </button>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <h2>Model</h2>
-        <div class="field">
-          <select id="live-model-select"></select>
-          <button id="refresh-models-btn" class="secondary-btn" type="button">
-            Refresh
-          </button>
-        </div>
-        <p class="hint" id="live-model-hint">
-          Choose a model for transcription. The list is fetched from the selected provider.
-        </p>
-      </section>
-
-      <section class="settings-section">
-        <h2>Hotkey</h2>
-        <div class="field">
-          <input
-            type="text"
-            id="hotkey-input"
-            placeholder="Alt+G"
-            spellcheck="false"
-            autocomplete="off"
-          />
-        </div>
-        <p class="hint">
-          Press the hotkey to start/stop recording.
-        </p>
-      </section>
-
-      <section class="settings-section">
-        <h2>Microphone</h2>
-        <div class="field">
-          <select id="microphone-select"></select>
-          <button id="refresh-microphones-btn" class="secondary-btn" type="button">
-            Refresh
-          </button>
-        </div>
-        <p class="hint">
-          Pick the input device used for recording. If unavailable, default input is used.
-        </p>
-        <div class="inline-field mic-loudness-field">
-          <label for="recording-loudness">Recording loudness</label>
-          <input
-            type="range"
-            id="recording-loudness"
-            min="25"
-            max="300"
-            step="5"
-            value="100"
-          />
-          <span class="unit" id="recording-loudness-value">100%</span>
-        </div>
-        <p class="hint">Boosts mic input before transcription. Start around 120-150% if speech is too quiet.</p>
-        <div class="mic-test-panel">
-          <div class="mic-wave-wrap">
-            <canvas id="mic-wave-canvas" height="64"></canvas>
-          </div>
-          <div class="mic-test-controls">
-            <button id="mic-test-btn" class="secondary-btn" type="button">Start 5s test</button>
-            <button id="continuous-mic-test-btn" class="secondary-btn" type="button">
-              Start continuous test
-            </button>
-            <button
-              id="wave-style-btn"
-              class="icon-btn mic-tool-btn"
-              type="button"
-              aria-label="Change waveform style"
-              title="Change waveform style"
-              hidden
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M2 14c2 0 2-6 4-6s2 10 4 10 2-14 4-14 2 8 4 8 2-4 4-4" />
-              </svg>
-            </button>
-            <button
-              id="wave-color-btn"
-              class="icon-btn mic-tool-btn"
-              type="button"
-              aria-label="Change waveform color scheme"
-              title="Change waveform color scheme"
-              hidden
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="6" cy="12" r="2.5" />
-                <circle cx="12" cy="8" r="2.5" />
-                <circle cx="18" cy="12" r="2.5" />
-                <path d="M7.8 13.6 10.2 9.9" />
-                <path d="M13.8 9.9 16.2 13.6" />
-              </svg>
-            </button>
-            <span id="mic-test-status" class="hint">Idle</span>
-            <span id="mic-signal-indicator" class="status-indicator disconnected">
-              <span class="status-dot"></span>
-              <span class="status-text">No signal</span>
-            </span>
-          </div>
-          <p class="hint">Use the 5-second test for a quick check, or continuous test to listen until you stop it.</p>
-          <p id="mic-test-transcript" class="hint mic-test-transcript">Transcript: -</p>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <h2>Debug</h2>
-        <label class="checkbox-label">
-          <input type="checkbox" id="debug-logging-checkbox" />
-          <span>Enable debug logging to local file</span>
-        </label>
-        <button id="open-debug-folder-btn" class="secondary-btn" type="button">
-          Open debug logs folder
-        </button>
-        <p class="hint" id="debug-log-path">Debug logs are disabled.</p>
-      </section>
-
-      <section class="settings-section">
-        <h2>Typing Mode</h2>
-        <div class="radio-group">
-          <label class="radio-label">
-            <input type="radio" name="typing-mode" value="all_at_once" />
-            <span>Type all at once</span>
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="typing-mode" value="incremental" checked />
-            <span>Type incrementally</span>
-            <span class="badge default">default</span>
-            <span class="badge beta">beta</span>
-          </label>
-        </div>
-        <p class="hint" id="typing-mode-hint">
-          Text appears as you speak. May cause issues in some apps.
-        </p>
-        <div class="inline-field">
-          <label for="line-break-mode-select">Line break mode</label>
-          <select id="line-break-mode-select">
-            <option value="enter">Enter</option>
-            <option value="shift_enter">Shift+Enter</option>
-            <option value="ctrl_enter">Ctrl+Enter</option>
-          </select>
-        </div>
-        <p class="hint">
-          Controls how spoken line breaks are typed into apps. `new paragraph` sends two line breaks.
-        </p>
-      </section>
-
-      <section class="settings-section">
-        <div class="section-heading-row">
-          <h2>Transcript Correction</h2>
-          <span class="badge beta">beta</span>
-        </div>
-        <label class="checkbox-label">
-          <input type="checkbox" id="transcript-correction-checkbox" />
-          <span>Enable AI transcript correction</span>
-        </label>
-        <p class="hint" id="transcript-correction-hint">
-          Cleans up the final transcript with a language model before typing. Works only in Type all at once mode.
-        </p>
-        <div id="transcript-correction-controls">
+      <div class="settings-scroll scroll-panel scroll-panel-xl">
+        <section class="settings-section">
+          <h2>Speech Provider</h2>
           <div class="field">
-            <select id="correction-model-select"></select>
-            <button id="refresh-correction-models-btn" class="secondary-btn" type="button">
+            <div class="field-block">
+              <select id="stt-provider-select">
+                <option value="gemini">Gemini</option>
+                <option value="openai">OpenAI</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">Choose the transcription backend used for recording and mic test.</p>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading-row">
+            <h2>API KEY</h2>
+            <button
+              id="api-key-help-btn"
+              class="icon-btn help-btn"
+              type="button"
+              title="How to get an API key"
+              aria-label="How to get an API key"
+            >
+              <i data-lucide="circle-help"></i>
+            </button>
+          </div>
+          <div class="field api-key-row">
+            <div class="field-block">
+              <input
+                type="password"
+                id="api-key-input"
+                placeholder="Paste your API key..."
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </div>
+            <button
+              id="toggle-key-visibility"
+              class="icon-btn"
+              type="button"
+              title="Toggle visibility"
+              aria-label="Toggle API key visibility"
+            >
+              <i data-lucide="eye"></i>
+            </button>
+          </div>
+          <div class="status-row">
+            <span id="connection-status" class="status-indicator disconnected">
+              <span class="status-dot"></span>
+              <span class="status-text">Not configured</span>
+            </span>
+            <button id="test-api-key-btn" class="secondary-btn" type="button">Test</button>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2>Model</h2>
+          <div class="field trailing-action-field">
+            <div class="field-block">
+              <select id="live-model-select"></select>
+            </div>
+            <button id="refresh-models-btn" class="secondary-btn" type="button">Refresh</button>
+          </div>
+          <p class="hint" id="live-model-hint">
+            Choose a model for transcription. The list is fetched from the selected provider.
+          </p>
+        </section>
+
+        <section class="settings-section">
+          <h2>Hotkey</h2>
+          <div class="field">
+            <div class="field-block">
+              <input
+                type="text"
+                id="hotkey-input"
+                placeholder="Alt+G"
+                spellcheck="false"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+          <p class="hint">Press the hotkey to start or stop recording.</p>
+        </section>
+
+        <section class="settings-section">
+          <h2>Microphone</h2>
+          <div class="field trailing-action-field">
+            <div class="field-block">
+              <select id="microphone-select"></select>
+            </div>
+            <button id="refresh-microphones-btn" class="secondary-btn" type="button">
               Refresh
             </button>
           </div>
-          <p class="hint" id="correction-model-hint">
-            Choose a language model used only for transcript correction.
+          <p class="hint">
+            Pick the input device used for recording. If unavailable, default input is used.
           </p>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <h2>Voice Detection</h2>
-        <label class="checkbox-label">
-          <input type="checkbox" id="auto-stop-checkbox" checked />
-          <span>Auto-stop on silence</span>
-          <span class="badge beta">beta</span>
-        </label>
-        <div class="inline-field" id="silence-timeout-field" style="display: flex;">
-          <label for="silence-timeout">Silence timeout:</label>
-          <input
-            type="number"
-            id="silence-timeout"
-            min="0.5"
-            max="10"
-            step="0.5"
-            value="4.0"
-          />
-          <span class="unit">seconds</span>
-        </div>
-      </section>
-
-      <section class="settings-section">
-        <h2>Languages</h2>
-        <div class="language-grid">
-          <div class="language-field">
-            <label for="language-select">Source language</label>
-            <select id="language-select">
-              <option value="auto">Auto-detect</option>
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-              <option value="ru">Russian</option>
-              <option value="zh">Chinese</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="ar">Arabic</option>
-              <option value="hi">Hindi</option>
-              <option value="nl">Dutch</option>
-              <option value="pl">Polish</option>
-              <option value="uk">Ukrainian</option>
-            </select>
+          <label class="inline-field mic-loudness-field" for="recording-loudness">
+            <span>Recording loudness</span>
+            <input
+              type="range"
+              id="recording-loudness"
+              min="25"
+              max="300"
+              step="5"
+              value="100"
+            />
+            <span class="unit" id="recording-loudness-value">100%</span>
+          </label>
+          <p class="hint">Boost mic input before transcription. Start around 120-150% if speech is too quiet.</p>
+          <div class="wave-panel mic-wave-panel">
+            <div class="wave-canvas-wrap mic-wave-wrap">
+              <canvas id="mic-wave-canvas" height="64"></canvas>
+            </div>
+            <div class="wave-controls mic-test-controls">
+              <div class="stack-actions">
+                <button id="mic-test-btn" class="secondary-btn" type="button">Start 5s test</button>
+                <button id="continuous-mic-test-btn" class="secondary-btn" type="button">
+                  Start continuous test
+                </button>
+                <button
+                  id="wave-style-btn"
+                  class="icon-btn"
+                  type="button"
+                  aria-label="Change waveform style"
+                  title="Change waveform style"
+                  hidden
+                >
+                  <i data-lucide="audio-waveform"></i>
+                </button>
+                <button
+                  id="wave-color-btn"
+                  class="icon-btn"
+                  type="button"
+                  aria-label="Change waveform color scheme"
+                  title="Change waveform color scheme"
+                  hidden
+                >
+                  <i data-lucide="palette"></i>
+                </button>
+              </div>
+              <div class="status-row mic-status-row">
+                <span id="mic-test-status" class="wave-label">Idle</span>
+                <span id="mic-signal-indicator" class="status-indicator disconnected">
+                  <span class="status-dot"></span>
+                  <span class="status-text">No signal</span>
+                </span>
+              </div>
+            </div>
+            <p class="hint">Use the 5-second test for a quick check, or continuous test to listen until you stop it.</p>
+            <div id="mic-test-transcript" class="mini-panel mic-test-transcript">Transcript: -</div>
           </div>
-          <div class="language-field">
-            <label for="target-language-select">Target language</label>
-            <select id="target-language-select">
-              <option value="">Keep original</option>
-              <option value="en">English</option>
-              <option value="es">Spanish</option>
-              <option value="fr">French</option>
-              <option value="de">German</option>
-              <option value="it">Italian</option>
-              <option value="pt">Portuguese</option>
-              <option value="ru">Russian</option>
-              <option value="zh">Chinese</option>
-              <option value="ja">Japanese</option>
-              <option value="ko">Korean</option>
-              <option value="ar">Arabic</option>
-              <option value="hi">Hindi</option>
-              <option value="nl">Dutch</option>
-              <option value="pl">Polish</option>
-              <option value="uk">Ukrainian</option>
-            </select>
+        </section>
+
+        <section class="settings-section">
+          <h2>Debug</h2>
+          <label class="checkbox-label">
+            <input type="checkbox" id="debug-logging-checkbox" />
+            <span>Enable debug logging to local file</span>
+          </label>
+          <button id="open-debug-folder-btn" class="secondary-btn" type="button">
+            Open debug logs folder
+          </button>
+          <p class="hint" id="debug-log-path">Debug logs are disabled.</p>
+        </section>
+
+        <section class="settings-section">
+          <h2>Typing Mode</h2>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="typing-mode" value="all_at_once" />
+              <span>Type all at once</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="typing-mode" value="incremental" checked />
+              <span>Type incrementally</span>
+              <span class="badge default">default</span>
+              <span class="badge beta">beta</span>
+            </label>
           </div>
-        </div>
-        <p class="hint">
-          Source language is used for transcription. If target language is set, transcript correction translates the final all-at-once output into that language.
-        </p>
-      </section>
+          <p class="hint" id="typing-mode-hint">
+            Text appears as you speak. May cause issues in some apps.
+          </p>
+          <label class="inline-field" for="line-break-mode-select">
+            <span>Line break mode</span>
+            <select id="line-break-mode-select">
+              <option value="enter">Enter</option>
+              <option value="shift_enter">Shift+Enter</option>
+              <option value="ctrl_enter">Ctrl+Enter</option>
+            </select>
+          </label>
+          <p class="hint">
+            Controls how spoken line breaks are typed into apps. `new paragraph` sends two line breaks.
+          </p>
+        </section>
+
+        <section class="settings-section">
+          <div class="section-heading-row">
+            <h2>Transcript Correction</h2>
+            <span class="badge beta">beta</span>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="transcript-correction-checkbox" />
+            <span>Enable AI transcript correction</span>
+          </label>
+          <p class="hint" id="transcript-correction-hint">
+            Cleans up the final transcript with a language model before typing. Works only in Type all at once mode.
+          </p>
+          <div id="transcript-correction-controls" class="transcript-correction-controls">
+            <div class="field trailing-action-field">
+              <div class="field-block">
+                <select id="correction-model-select"></select>
+              </div>
+              <button id="refresh-correction-models-btn" class="secondary-btn" type="button">
+                Refresh
+              </button>
+            </div>
+            <p class="hint" id="correction-model-hint">
+              Choose a language model used only for transcript correction.
+            </p>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h2>Voice Detection</h2>
+          <label class="checkbox-label">
+            <input type="checkbox" id="listening-ding-checkbox" checked />
+            <span>Play a ding when listening starts</span>
+          </label>
+          <label class="inline-field" for="listening-ding-sound-select">
+            <span>Ding sound</span>
+            <select id="listening-ding-sound-select">
+              <option value="chime">Chime</option>
+              <option value="soft">Soft</option>
+              <option value="digital">Digital</option>
+            </select>
+          </label>
+          <label class="inline-field" for="listening-ding-volume">
+            <span>Ding volume</span>
+            <input
+              type="range"
+              id="listening-ding-volume"
+              min="0"
+              max="100"
+              step="5"
+              value="60"
+            />
+            <span class="unit" id="listening-ding-volume-value">60%</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="auto-stop-checkbox" checked />
+            <span>Auto-stop on silence</span>
+            <span class="badge beta">beta</span>
+          </label>
+          <label class="inline-field" id="silence-timeout-field" for="silence-timeout">
+            <span>Silence timeout</span>
+            <input
+              type="number"
+              id="silence-timeout"
+              min="0.5"
+              max="10"
+              step="0.5"
+              value="4.0"
+            />
+            <span class="unit">seconds</span>
+          </label>
+        </section>
+
+        <section class="settings-section">
+          <h2>Languages</h2>
+          <div class="language-grid">
+            <div class="language-field">
+              <label for="language-select">Source language</label>
+              <select id="language-select">
+                <option value="auto">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+                <option value="nl">Dutch</option>
+                <option value="pl">Polish</option>
+                <option value="uk">Ukrainian</option>
+              </select>
+            </div>
+            <div class="language-field">
+              <label for="target-language-select">Target language</label>
+              <select id="target-language-select">
+                <option value="">Keep original</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+                <option value="nl">Dutch</option>
+                <option value="pl">Polish</option>
+                <option value="uk">Ukrainian</option>
+              </select>
+            </div>
+          </div>
+          <p class="hint">
+            Source language is used for transcription. If target language is set, transcript correction translates the final all-at-once output into that language.
+          </p>
+        </section>
+      </div>
 
       <footer class="settings-footer">
         <button id="reset-defaults-btn" class="secondary-btn" type="button">
@@ -328,8 +365,7 @@
         <img src="/settings-goblin-transparent.png" alt="" class="settings-brand-image" />
       </div>
       <p class="settings-goblin-note">
-        Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking"
-        in this establishment.
+        Goblin note: screaming, yapping, and dramatic rambling all count as valid "speaking" in this establishment.
       </p>
 
       <div id="api-key-help-modal" class="modal-backdrop" hidden>
@@ -343,11 +379,11 @@
             <h3 id="api-key-help-title">Get an API key</h3>
             <button
               id="close-api-key-help-btn"
-              class="icon-btn modal-close-btn"
+              class="icon-btn modal-close-btn modal-btn-reject"
               type="button"
               aria-label="Close API key instructions"
             >
-              &times;
+              <i data-lucide="x"></i>
             </button>
           </div>
           <ol class="modal-list">

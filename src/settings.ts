@@ -1,14 +1,15 @@
-import { load, Store } from "@tauri-apps/plugin-store";
-import { DEFAULT_TEXT_COMMANDS, type TextCommand } from "./text-commands";
 import {
   isWaveformColorScheme,
   isWaveformStyle,
   type WaveformColorScheme,
   type WaveformStyle,
-} from "./waveform-styles";
+} from "@goblin-systems/goblin-design-system";
+import { load, Store } from "@tauri-apps/plugin-store";
+import { DEFAULT_TEXT_COMMANDS, type TextCommand } from "./text-commands";
 
 export type SttProvider = "gemini" | "openai";
 export type LineBreakMode = "enter" | "shift_enter" | "ctrl_enter";
+export type ListeningDingSound = "chime" | "soft" | "digital";
 
 export interface ProviderModelCache {
   apiKeyFingerprint: string;
@@ -64,6 +65,9 @@ export interface Settings {
   language: string;
   targetLanguage: string;
   lineBreakMode: LineBreakMode;
+  playListeningDing: boolean;
+  listeningDingSound: ListeningDingSound;
+  listeningDingVolume: number;
   textCommandsEnabled: boolean;
   customTextCommands: TextCommand[];
 }
@@ -112,9 +116,16 @@ const DEFAULTS: Settings = {
   language: "auto",
   targetLanguage: "",
   lineBreakMode: "enter",
+  playListeningDing: true,
+  listeningDingSound: "chime",
+  listeningDingVolume: 60,
   textCommandsEnabled: true,
   customTextCommands: [],
 };
+
+function isListeningDingSound(value: unknown): value is ListeningDingSound {
+  return value === "chime" || value === "soft" || value === "digital";
+}
 
 export function getDefaultSettings(): Settings {
   return {
@@ -391,6 +402,27 @@ export async function loadSettings(): Promise<Settings> {
     settings.lineBreakMode = lineBreakMode;
   }
 
+  const playListeningDing = await s.get<boolean>("playListeningDing");
+  if (playListeningDing !== undefined && playListeningDing !== null) {
+    settings.playListeningDing = playListeningDing;
+  }
+
+  const listeningDingSound = await s.get<string>("listeningDingSound");
+  if (isListeningDingSound(listeningDingSound)) {
+    settings.listeningDingSound = listeningDingSound;
+  }
+
+  const listeningDingVolume = await s.get<number>("listeningDingVolume");
+  if (
+    listeningDingVolume !== undefined &&
+    listeningDingVolume !== null &&
+    Number.isFinite(listeningDingVolume) &&
+    listeningDingVolume >= 0 &&
+    listeningDingVolume <= 100
+  ) {
+    settings.listeningDingVolume = listeningDingVolume;
+  }
+
   const textCommandsEnabled = await s.get<boolean>("textCommandsEnabled");
   if (textCommandsEnabled !== undefined && textCommandsEnabled !== null) {
     settings.textCommandsEnabled = textCommandsEnabled;
@@ -436,6 +468,9 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("language", settings.language);
   await s.set("targetLanguage", settings.targetLanguage);
   await s.set("lineBreakMode", settings.lineBreakMode);
+  await s.set("playListeningDing", settings.playListeningDing);
+  await s.set("listeningDingSound", settings.listeningDingSound);
+  await s.set("listeningDingVolume", settings.listeningDingVolume);
   await s.set("textCommandsEnabled", settings.textCommandsEnabled);
   await s.set("customTextCommands", settings.customTextCommands);
   await s.set("textCommands", [...DEFAULT_TEXT_COMMANDS, ...settings.customTextCommands]);

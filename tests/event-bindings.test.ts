@@ -63,6 +63,11 @@ function createDom(): MainDom {
     silenceTimeoutInput: createEmitterElement({}) as any,
     languageSelect: createEmitterElement({}) as any,
     targetLanguageSelect: createEmitterElement({}) as any,
+    lineBreakModeSelect: createEmitterElement({}) as any,
+    listeningDingCheckbox: createEmitterElement({ checked: true }) as any,
+    listeningDingSoundSelect: createEmitterElement({ value: "chime", disabled: false }) as any,
+    listeningDingVolumeInput: createEmitterElement({ value: "60", disabled: false }) as any,
+    listeningDingVolumeValue: { textContent: "60%" } as any,
     resetDefaultsBtn: createEmitterElement({}) as any,
     appToast: {} as any,
     windowMinimizeBtn: null,
@@ -96,6 +101,8 @@ describe("event bindings", () => {
       updateTypingModeHint: mock(() => {}),
       updateTranscriptCorrectionUI: mock(() => {}),
       updateRecordingLoudnessValue: mock(() => {}),
+      updateListeningDingVolumeValue: mock(() => {}),
+      previewListeningDing: mock(() => {}),
       updateWaveToolButtons: mock(() => {}),
       refreshLiveModelList,
       refreshCorrectionModelList,
@@ -137,6 +144,8 @@ describe("event bindings", () => {
     const updateTypingModeHint = mock(() => {});
     const updateTranscriptCorrectionUI = mock(() => {});
     const updateRecordingLoudnessValue = mock(() => {});
+    const updateListeningDingVolumeValue = mock(() => {});
+    const previewListeningDing = mock(() => {});
     const updateWaveToolButtons = mock(() => {});
     const cycleWaveformStyle = mock(() => {});
     const cycleWaveformColorScheme = mock(() => {});
@@ -157,6 +166,8 @@ describe("event bindings", () => {
       updateTypingModeHint,
       updateTranscriptCorrectionUI,
       updateRecordingLoudnessValue,
+      updateListeningDingVolumeValue,
+      previewListeningDing,
       updateWaveToolButtons,
       refreshLiveModelList: async () => {},
       refreshCorrectionModelList: async () => {},
@@ -178,10 +189,15 @@ describe("event bindings", () => {
     await (dom.waveColorBtn as any).emit("click");
     await (dom.microphoneSelect as any).emit("change");
     await (dom.debugLoggingCheckbox as any).emit("change");
+    await (dom.listeningDingCheckbox as any).emit("change");
+    await (dom.listeningDingSoundSelect as any).emit("change");
+    await (dom.listeningDingVolumeInput as any).emit("input");
 
     expect(updateTypingModeHint).toHaveBeenCalled();
     expect(updateTranscriptCorrectionUI).toHaveBeenCalled();
     expect(updateRecordingLoudnessValue).toHaveBeenCalled();
+    expect(updateListeningDingVolumeValue).toHaveBeenCalled();
+    expect(previewListeningDing).toHaveBeenCalled();
     expect(unlockWaveformEasterEgg).toHaveBeenCalled();
     expect(cycleWaveformStyle).toHaveBeenCalledTimes(2);
     expect(cycleWaveformColorScheme).toHaveBeenCalledTimes(1);

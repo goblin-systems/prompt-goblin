@@ -4,6 +4,7 @@ import {
   getProviderApiKey,
   saveSettings,
   type LineBreakMode,
+  type ListeningDingSound,
   type Settings,
   type SttProvider,
 } from "../settings";
@@ -27,6 +28,9 @@ export interface SettingsFormSnapshot {
   language: string;
   targetLanguage: string;
   lineBreakMode: LineBreakMode;
+  playListeningDing: boolean;
+  listeningDingSound: ListeningDingSound;
+  listeningDingVolumePercent: string;
 }
 
 export interface AutosaveStatus {
@@ -87,6 +91,14 @@ export function buildSettingsFromForm(
       ? recordingLoudnessPercent
       : currentSettings.recordingLoudness;
 
+  const listeningDingVolumePercent = Number.parseFloat(form.listeningDingVolumePercent);
+  const listeningDingVolume =
+    Number.isFinite(listeningDingVolumePercent) &&
+    listeningDingVolumePercent >= 0 &&
+    listeningDingVolumePercent <= 100
+      ? listeningDingVolumePercent
+      : currentSettings.listeningDingVolume;
+
   const nextSettings: Settings = {
     ...currentSettings,
     sttProvider: activeProvider,
@@ -114,6 +126,9 @@ export function buildSettingsFromForm(
     language: form.language,
     targetLanguage: form.targetLanguage,
     lineBreakMode: form.lineBreakMode,
+    playListeningDing: form.playListeningDing,
+    listeningDingSound: form.listeningDingSound,
+    listeningDingVolume,
   };
 
   nextSettings.providers[activeProvider].apiKey = form.apiKey.trim();

@@ -7,10 +7,10 @@
     <link rel="stylesheet" href="/src/overlay-styles.css" />
     <script type="module" src="/src/overlay.ts" defer></script>
   </head>
-  <body>
+  <body class="overlay-base">
     <div class="overlay-pill" id="overlay-pill" data-tauri-drag-region>
       <div class="overlay-main-row" id="overlay-main-row">
-        <div class="recording-dot" id="recording-dot"></div>
+        <span class="recording-dot" id="recording-dot"></span>
         <span class="overlay-label" id="overlay-label">Listening...</span>
         <span class="overlay-timer" id="overlay-timer">0:00</span>
       </div>

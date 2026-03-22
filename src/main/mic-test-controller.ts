@@ -1,13 +1,13 @@
-import type { MainDom } from "./dom";
-import { LiveAudioSession } from "../live-audio-session";
-import type { Settings, SttProvider } from "../settings";
-import { base64ToBytes } from "./utils";
 import {
   createWaveProgressGradient,
   drawWaveform,
   type WaveformColorScheme,
   type WaveformStyle,
-} from "../waveform-styles";
+} from "@goblin-systems/goblin-design-system";
+import type { MainDom } from "./dom";
+import { LiveAudioSession } from "../live-audio-session";
+import type { Settings, SttProvider } from "../settings";
+import { base64ToBytes } from "./utils";
 import { getProviderLabel } from "../stt/service";
 
 export interface InputDeviceInfo {
@@ -246,10 +246,10 @@ export class MicTestController {
     const timedActive = this.active && this.currentMode === "timed";
     const continuousActive = this.active && this.currentMode === "continuous";
 
-    this.options.dom.micTestBtn.textContent = timedActive ? "Stop 5s test" : "Start 5s test";
+    this.options.dom.micTestBtn.textContent = timedActive ? "Stop test" : "5s test";
     this.options.dom.continuousMicTestBtn.textContent = continuousActive
-      ? "Stop continuous test"
-      : "Start continuous test";
+      ? "Stop test"
+      : "Continuous test";
     this.options.dom.micTestBtn.disabled = continuousActive || this.stopInProgress;
     this.options.dom.continuousMicTestBtn.disabled = timedActive || this.stopInProgress;
   }

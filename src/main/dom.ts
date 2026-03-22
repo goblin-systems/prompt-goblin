@@ -1,3 +1,8 @@
+import {
+  byId,
+  byIdOptional,
+  populateSelectOptions,
+} from "@goblin-systems/goblin-design-system";
 import type { Settings } from "../settings";
 
 export type ConnectionStatus =
@@ -49,74 +54,69 @@ export interface MainDom {
   languageSelect: HTMLSelectElement;
   targetLanguageSelect: HTMLSelectElement;
   lineBreakModeSelect: HTMLSelectElement;
+  listeningDingCheckbox: HTMLInputElement;
+  listeningDingSoundSelect: HTMLSelectElement;
+  listeningDingVolumeInput: HTMLInputElement;
+  listeningDingVolumeValue: HTMLElement;
   resetDefaultsBtn: HTMLButtonElement;
   appToast: HTMLElement;
   windowMinimizeBtn: HTMLButtonElement | null;
   windowCloseBtn: HTMLButtonElement;
 }
 
-function byId<T extends HTMLElement>(doc: Document, id: string): T {
-  const element = doc.getElementById(id);
-  if (!element) {
-    throw new Error(`Missing required element: #${id}`);
-  }
-  return element as T;
-}
-
-function byIdOptional<T extends HTMLElement>(doc: Document, id: string): T | null {
-  const element = doc.getElementById(id);
-  return element ? (element as T) : null;
-}
-
 export function getMainDom(doc: Document): MainDom {
   return {
-    apiKeyInput: byId<HTMLInputElement>(doc, "api-key-input"),
-    sttProviderSelect: byId<HTMLSelectElement>(doc, "stt-provider-select"),
-    hotkeyInput: byId<HTMLInputElement>(doc, "hotkey-input"),
-    liveModelSelect: byId<HTMLSelectElement>(doc, "live-model-select"),
-    refreshModelsBtn: byId<HTMLButtonElement>(doc, "refresh-models-btn"),
-    liveModelHint: byId<HTMLElement>(doc, "live-model-hint"),
-    microphoneSelect: byId<HTMLSelectElement>(doc, "microphone-select"),
-    recordingLoudnessInput: byId<HTMLInputElement>(doc, "recording-loudness"),
-    recordingLoudnessValue: byId<HTMLElement>(doc, "recording-loudness-value"),
-    refreshMicrophonesBtn: byId<HTMLButtonElement>(doc, "refresh-microphones-btn"),
-    micTestBtn: byId<HTMLButtonElement>(doc, "mic-test-btn"),
-    continuousMicTestBtn: byId<HTMLButtonElement>(doc, "continuous-mic-test-btn"),
-    waveStyleBtn: byId<HTMLButtonElement>(doc, "wave-style-btn"),
-    waveColorBtn: byId<HTMLButtonElement>(doc, "wave-color-btn"),
-    micTestStatus: byId<HTMLElement>(doc, "mic-test-status"),
-    micTestTranscript: byId<HTMLElement>(doc, "mic-test-transcript"),
-    micSignalIndicator: byId<HTMLElement>(doc, "mic-signal-indicator"),
-    micWaveCanvas: byId<HTMLCanvasElement>(doc, "mic-wave-canvas"),
-    debugLoggingCheckbox: byId<HTMLInputElement>(doc, "debug-logging-checkbox"),
-    openDebugFolderBtn: byId<HTMLButtonElement>(doc, "open-debug-folder-btn"),
-    debugLogPath: byId<HTMLElement>(doc, "debug-log-path"),
-    toggleKeyBtn: byId<HTMLButtonElement>(doc, "toggle-key-visibility"),
-    apiKeyHelpBtn: byId<HTMLButtonElement>(doc, "api-key-help-btn"),
-    apiKeyHelpModal: byId<HTMLElement>(doc, "api-key-help-modal"),
-    closeApiKeyHelpBtn: byId<HTMLButtonElement>(doc, "close-api-key-help-btn"),
-    connectionStatus: byId<HTMLElement>(doc, "connection-status"),
-    testApiKeyBtn: byId<HTMLButtonElement>(doc, "test-api-key-btn"),
+    apiKeyInput: byId<HTMLInputElement>("api-key-input", doc),
+    sttProviderSelect: byId<HTMLSelectElement>("stt-provider-select", doc),
+    hotkeyInput: byId<HTMLInputElement>("hotkey-input", doc),
+    liveModelSelect: byId<HTMLSelectElement>("live-model-select", doc),
+    refreshModelsBtn: byId<HTMLButtonElement>("refresh-models-btn", doc),
+    liveModelHint: byId<HTMLElement>("live-model-hint", doc),
+    microphoneSelect: byId<HTMLSelectElement>("microphone-select", doc),
+    recordingLoudnessInput: byId<HTMLInputElement>("recording-loudness", doc),
+    recordingLoudnessValue: byId<HTMLElement>("recording-loudness-value", doc),
+    refreshMicrophonesBtn: byId<HTMLButtonElement>("refresh-microphones-btn", doc),
+    micTestBtn: byId<HTMLButtonElement>("mic-test-btn", doc),
+    continuousMicTestBtn: byId<HTMLButtonElement>("continuous-mic-test-btn", doc),
+    waveStyleBtn: byId<HTMLButtonElement>("wave-style-btn", doc),
+    waveColorBtn: byId<HTMLButtonElement>("wave-color-btn", doc),
+    micTestStatus: byId<HTMLElement>("mic-test-status", doc),
+    micTestTranscript: byId<HTMLElement>("mic-test-transcript", doc),
+    micSignalIndicator: byId<HTMLElement>("mic-signal-indicator", doc),
+    micWaveCanvas: byId<HTMLCanvasElement>("mic-wave-canvas", doc),
+    debugLoggingCheckbox: byId<HTMLInputElement>("debug-logging-checkbox", doc),
+    openDebugFolderBtn: byId<HTMLButtonElement>("open-debug-folder-btn", doc),
+    debugLogPath: byId<HTMLElement>("debug-log-path", doc),
+    toggleKeyBtn: byId<HTMLButtonElement>("toggle-key-visibility", doc),
+    apiKeyHelpBtn: byId<HTMLButtonElement>("api-key-help-btn", doc),
+    apiKeyHelpModal: byId<HTMLElement>("api-key-help-modal", doc),
+    closeApiKeyHelpBtn: byId<HTMLButtonElement>("close-api-key-help-btn", doc),
+    connectionStatus: byId<HTMLElement>("connection-status", doc),
+    testApiKeyBtn: byId<HTMLButtonElement>("test-api-key-btn", doc),
     typingModeRadios: doc.querySelectorAll(
       'input[name="typing-mode"]'
     ) as NodeListOf<HTMLInputElement>,
-    typingModeHint: byId<HTMLElement>(doc, "typing-mode-hint"),
-    transcriptCorrectionCheckbox: byId<HTMLInputElement>(doc, "transcript-correction-checkbox"),
-    transcriptCorrectionHint: byId<HTMLElement>(doc, "transcript-correction-hint"),
-    transcriptCorrectionControls: byId<HTMLElement>(doc, "transcript-correction-controls"),
-    correctionModelSelect: byId<HTMLSelectElement>(doc, "correction-model-select"),
-    refreshCorrectionModelsBtn: byId<HTMLButtonElement>(doc, "refresh-correction-models-btn"),
-    correctionModelHint: byId<HTMLElement>(doc, "correction-model-hint"),
-    autoStopCheckbox: byId<HTMLInputElement>(doc, "auto-stop-checkbox"),
-    silenceTimeoutField: byId<HTMLElement>(doc, "silence-timeout-field"),
-    silenceTimeoutInput: byId<HTMLInputElement>(doc, "silence-timeout"),
-    languageSelect: byId<HTMLSelectElement>(doc, "language-select"),
-    targetLanguageSelect: byId<HTMLSelectElement>(doc, "target-language-select"),
-    lineBreakModeSelect: byId<HTMLSelectElement>(doc, "line-break-mode-select"),
-    resetDefaultsBtn: byId<HTMLButtonElement>(doc, "reset-defaults-btn"),
-    appToast: byId<HTMLElement>(doc, "app-toast"),
-    windowMinimizeBtn: byIdOptional<HTMLButtonElement>(doc, "window-minimize-btn"),
-    windowCloseBtn: byId<HTMLButtonElement>(doc, "window-close-btn"),
+    typingModeHint: byId<HTMLElement>("typing-mode-hint", doc),
+    transcriptCorrectionCheckbox: byId<HTMLInputElement>("transcript-correction-checkbox", doc),
+    transcriptCorrectionHint: byId<HTMLElement>("transcript-correction-hint", doc),
+    transcriptCorrectionControls: byId<HTMLElement>("transcript-correction-controls", doc),
+    correctionModelSelect: byId<HTMLSelectElement>("correction-model-select", doc),
+    refreshCorrectionModelsBtn: byId<HTMLButtonElement>("refresh-correction-models-btn", doc),
+    correctionModelHint: byId<HTMLElement>("correction-model-hint", doc),
+    autoStopCheckbox: byId<HTMLInputElement>("auto-stop-checkbox", doc),
+    silenceTimeoutField: byId<HTMLElement>("silence-timeout-field", doc),
+    silenceTimeoutInput: byId<HTMLInputElement>("silence-timeout", doc),
+    languageSelect: byId<HTMLSelectElement>("language-select", doc),
+    targetLanguageSelect: byId<HTMLSelectElement>("target-language-select", doc),
+    lineBreakModeSelect: byId<HTMLSelectElement>("line-break-mode-select", doc),
+    listeningDingCheckbox: byId<HTMLInputElement>("listening-ding-checkbox", doc),
+    listeningDingSoundSelect: byId<HTMLSelectElement>("listening-ding-sound-select", doc),
+    listeningDingVolumeInput: byId<HTMLInputElement>("listening-ding-volume", doc),
+    listeningDingVolumeValue: byId<HTMLElement>("listening-ding-volume-value", doc),
+    resetDefaultsBtn: byId<HTMLButtonElement>("reset-defaults-btn", doc),
+    appToast: byId<HTMLElement>("app-toast", doc),
+    windowMinimizeBtn: byIdOptional<HTMLButtonElement>("window-minimize-btn", doc),
+    windowCloseBtn: byId<HTMLButtonElement>("window-close-btn", doc),
   };
 }
 
@@ -160,6 +160,10 @@ export function populateUI(dom: MainDom, settings: Settings) {
   dom.languageSelect.value = settings.language;
   dom.targetLanguageSelect.value = settings.targetLanguage;
   dom.lineBreakModeSelect.value = settings.lineBreakMode;
+  dom.listeningDingCheckbox.checked = settings.playListeningDing;
+  dom.listeningDingSoundSelect.value = settings.listeningDingSound;
+  dom.listeningDingVolumeInput.value = String(settings.listeningDingVolume);
+  dom.listeningDingVolumeValue.textContent = `${Math.round(settings.listeningDingVolume)}%`;
   dom.recordingLoudnessInput.value = String(settings.recordingLoudness);
   dom.recordingLoudnessValue.textContent = `${Math.round(settings.recordingLoudness)}%`;
 }
@@ -173,7 +177,7 @@ export function populateLiveModelOptions(
   models: string[],
   preferredModel: string
 ) {
-  populateSelectOptions(dom.liveModelSelect, models, preferredModel);
+  populateModelOptions(dom.liveModelSelect, models, preferredModel);
 }
 
 export function setCorrectionModelHint(dom: MainDom, text: string) {
@@ -185,36 +189,21 @@ export function populateCorrectionModelOptions(
   models: string[],
   preferredModel: string
 ) {
-  populateSelectOptions(dom.correctionModelSelect, models, preferredModel);
+  populateModelOptions(dom.correctionModelSelect, models, preferredModel);
 }
 
-function populateSelectOptions(
+function populateModelOptions(
   select: HTMLSelectElement,
   models: string[],
   preferredModel: string
 ) {
-  select.innerHTML = "";
-
   if (models.length === 0) {
-    const emptyOption = document.createElement("option");
-    emptyOption.value = "";
-    emptyOption.textContent = "No models available";
-    select.appendChild(emptyOption);
-    select.value = "";
-    select.disabled = true;
+    populateSelectOptions(select, [], "");
     return;
   }
 
-  for (const model of models) {
-    const option = document.createElement("option");
-    option.value = model;
-    option.textContent = model;
-    select.appendChild(option);
-  }
-
-  select.disabled = false;
   const selected = models.includes(preferredModel) ? preferredModel : models[0];
-  select.value = selected;
+  populateSelectOptions(select, models, selected);
 }
 
 export function updateTypingModeHint(dom: MainDom, mode: string) {
