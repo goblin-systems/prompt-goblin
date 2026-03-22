@@ -154,6 +154,7 @@ function readFormSnapshot(): SettingsFormSnapshot {
     silenceTimeoutSeconds: dom.silenceTimeoutInput.value,
     language: dom.languageSelect.value,
     targetLanguage: dom.targetLanguageSelect.value,
+    lineBreakMode: dom.lineBreakModeSelect.value as Settings["lineBreakMode"],
   };
 }
 

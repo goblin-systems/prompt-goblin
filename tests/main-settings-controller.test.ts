@@ -22,6 +22,7 @@ function createForm(overrides: Partial<SettingsFormSnapshot> = {}): SettingsForm
     silenceTimeoutSeconds: "5.5",
     language: "en",
     targetLanguage: "de",
+    lineBreakMode: "ctrl_enter",
     ...overrides,
   };
 }
@@ -45,6 +46,7 @@ describe("settings controller helpers", () => {
     expect(nextSettings.providers.openai.apiKey).toBe("keep-openai");
     expect(nextSettings.recordingLoudness).toBe(175);
     expect(nextSettings.autoStopSilenceMs).toBe(5500);
+    expect(nextSettings.lineBreakMode).toBe("ctrl_enter");
   });
 
   test("buildSettingsFromForm falls back to current values for invalid numeric input", () => {

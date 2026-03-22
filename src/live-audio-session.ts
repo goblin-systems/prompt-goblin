@@ -137,12 +137,12 @@ export class LiveAudioSession<TStopResult = unknown> {
     if (this.options.enableTyping) {
       if (this.options.typingMode === "all_at_once") {
         if (finalText) {
-          await invoke("type_text", { text: finalText });
+          await this.typeText(finalText);
         }
       } else {
         const tailText = this.processIncrementalTranscriptForTyping(this.latestRawTranscript, true);
         if (tailText) {
-          await invoke("type_text", { text: tailText });
+          await this.typeText(tailText);
         }
       }
     }
@@ -180,7 +180,7 @@ export class LiveAudioSession<TStopResult = unknown> {
       if (this.options.enableTyping && this.active) {
         const newText = this.processIncrementalTranscriptForTyping(text, isFinal);
         if (newText.length > 0) {
-          invoke("type_text", { text: newText }).catch((err) => {
+          this.typeText(newText).catch((err) => {
             console.error("Incremental type failed:", err);
           });
         }
@@ -208,6 +208,13 @@ export class LiveAudioSession<TStopResult = unknown> {
   private readonly handleStatus: StatusCallback = (status, message) => {
     this.options.onStatus?.(status, message);
   };
+
+  private typeText(text: string) {
+    return invoke("type_text", {
+      text,
+      lineBreakMode: this.options.textCommandSettings.lineBreakMode,
+    });
+  }
 
   private processFinalTranscript(text: string): string {
     return applyTextCommands(text, this.options.textCommandSettings).trim();
@@ -254,7 +261,7 @@ export class LiveAudioSession<TStopResult = unknown> {
       return;
     }
 
-    invoke("type_text", { text: tailText }).catch((err) => {
+    this.typeText(tailText).catch((err) => {
       console.error("Incremental tail flush type failed:", err);
     });
   }

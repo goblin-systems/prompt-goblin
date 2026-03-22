@@ -1,4 +1,5 @@
 import type { CorrectionRuntime } from "../types";
+import { buildCorrectionPromptParts } from "../prompt";
 
 const OPENAI_API_BASE = "https://api.openai.com/v1";
 const OPENAI_CORRECTION_MODEL_PRIORITY = [
@@ -51,32 +52,6 @@ function compareOpenAICorrectionPriority(left: string, right: string): number {
   };
 
   return score(left) - score(right) || left.localeCompare(right);
-}
-
-function buildCorrectionInstructions(sourceLanguage: string, targetLanguage: string): string {
-  const sourceLanguageInstruction =
-    !sourceLanguage || sourceLanguage === "auto"
-      ? "Infer the source language from the transcript if it is not obvious."
-      : `The source language is ${sourceLanguage}.`;
-  const shouldTranslate = !!targetLanguage.trim();
-  const outputLanguageInstruction = shouldTranslate
-    ? `Translate the corrected transcript into ${targetLanguage.trim()}. The final output must be entirely in ${targetLanguage.trim()}.`
-    : "Keep the corrected transcript in the original language.";
-
-  return [
-    "You clean up speech-to-text output before it is typed into another app.",
-    "Correct obvious transcription mistakes, capitalization, and spacing.",
-    shouldTranslate
-      ? "When a target language is provided, you must translate the corrected transcript into that target language instead of preserving the source language."
-      : "Do not translate unless explicitly instructed.",
-    "Preserve the user's wording and meaning as closely as possible.",
-    "Do not add explanations, quotes, markdown, bullet points, or commentary.",
-    "Preserve spoken command phrases exactly when they appear intentional, including words like comma, period, full stop, question mark, exclamation mark, colon, semicolon, quote, open quote, close quote, apostrophe, new line, new paragraph, tab, open bracket, close bracket, open parenthesis, close parenthesis, open brace, close brace, slash, backslash, dash, underscore, plus, equals.",
-    "Do not convert those command phrases into punctuation or symbols.",
-    sourceLanguageInstruction,
-    outputLanguageInstruction,
-    "Return only the final corrected transcript text.",
-  ].join(" ");
 }
 
 async function fetchOpenAICorrectionModels(apiKey: string): Promise<string[]> {
@@ -166,13 +141,15 @@ async function correctOpenAIText(
     return "";
   }
 
+  const prompt = buildCorrectionPromptParts(transcript, sourceLanguage, targetLanguage);
+
   const response = await fetch(`${OPENAI_API_BASE}/responses`, {
     method: "POST",
     headers: toAuthHeaders(apiKey),
     body: JSON.stringify({
       model: normalized,
-      instructions: buildCorrectionInstructions(sourceLanguage, targetLanguage),
-      input: transcript,
+      instructions: prompt.instructions,
+      input: prompt.input,
     }),
   });
 

@@ -100,6 +100,7 @@ export function setupMainEventBindings(options: EventBindingOptions) {
   dom.silenceTimeoutInput.addEventListener("input", () => settingsController.scheduleAutosave());
   dom.languageSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
   dom.targetLanguageSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
+  dom.lineBreakModeSelect.addEventListener("change", () => settingsController.scheduleAutosave(0));
 
   dom.refreshMicrophonesBtn.addEventListener("click", async () => {
     await refreshMicrophoneList(dom.microphoneSelect.value || "default");

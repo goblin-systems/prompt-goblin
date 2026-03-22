@@ -8,6 +8,7 @@ import {
 } from "./waveform-styles";
 
 export type SttProvider = "gemini" | "openai";
+export type LineBreakMode = "enter" | "shift_enter" | "ctrl_enter";
 
 export interface ProviderModelCache {
   apiKeyFingerprint: string;
@@ -62,6 +63,7 @@ export interface Settings {
   autoStopSilenceMs: number;
   language: string;
   targetLanguage: string;
+  lineBreakMode: LineBreakMode;
   textCommandsEnabled: boolean;
   customTextCommands: TextCommand[];
 }
@@ -109,6 +111,7 @@ const DEFAULTS: Settings = {
   autoStopSilenceMs: 4000,
   language: "auto",
   targetLanguage: "",
+  lineBreakMode: "enter",
   textCommandsEnabled: true,
   customTextCommands: [],
 };
@@ -379,6 +382,15 @@ export async function loadSettings(): Promise<Settings> {
     settings.targetLanguage = targetLanguage;
   }
 
+  const lineBreakMode = await s.get<string>("lineBreakMode");
+  if (
+    lineBreakMode === "enter" ||
+    lineBreakMode === "shift_enter" ||
+    lineBreakMode === "ctrl_enter"
+  ) {
+    settings.lineBreakMode = lineBreakMode;
+  }
+
   const textCommandsEnabled = await s.get<boolean>("textCommandsEnabled");
   if (textCommandsEnabled !== undefined && textCommandsEnabled !== null) {
     settings.textCommandsEnabled = textCommandsEnabled;
@@ -423,6 +435,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("autoStopSilenceMs", settings.autoStopSilenceMs);
   await s.set("language", settings.language);
   await s.set("targetLanguage", settings.targetLanguage);
+  await s.set("lineBreakMode", settings.lineBreakMode);
   await s.set("textCommandsEnabled", settings.textCommandsEnabled);
   await s.set("customTextCommands", settings.customTextCommands);
   await s.set("textCommands", [...DEFAULT_TEXT_COMMANDS, ...settings.customTextCommands]);

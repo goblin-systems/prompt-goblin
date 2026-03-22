@@ -1,3 +1,4 @@
+import { processIncrementalTranscriptUpdate } from "../../src/incremental-typing";
 import { applyTextCommands, getCommandTailGuardChars } from "../../src/text-commands";
 import { getDefaultSettings, type Settings, type SttProvider } from "../../src/settings";
 import { createLiveTranscriber } from "../../src/stt/service";
@@ -43,12 +44,13 @@ export async function runLiveTranscriberE2E(options: LiveE2ERunOptions): Promise
   let lastAudioTurnBoundaryAt = 0;
 
   const processIncrementalTranscriptForTyping = (text: string, isFinal: boolean): string => {
-    const stableRawText = isFinal ? text : text.slice(0, Math.max(0, text.length - guardChars));
-    const processedStableText = applyTextCommands(stableRawText, settings);
-    const newText = processedStableText.slice(lastTypedLength);
-    lastTypedLength = processedStableText.length;
-    latestRawTranscript = text;
-    return newText;
+    const update = processIncrementalTranscriptUpdate(text, isFinal, settings, guardChars, {
+      lastTypedLength,
+      latestRawTranscript,
+    });
+    lastTypedLength = update.lastTypedLength;
+    latestRawTranscript = update.latestRawTranscript;
+    return update.newText;
   };
 
   transcriber.configure({

@@ -1,9 +1,17 @@
+import { debugLog, isDebugLoggingEnabled } from "./logger";
+import { escapeWhitespaceForLog } from "./string-utils";
 import type { Settings } from "./settings";
 
 export interface TextCommand {
   phrase: string;
   replacement: string;
   aliases?: string[];
+}
+
+interface NormalizedTextCommand {
+  phrase: string;
+  replacement: string;
+  displayPhrase: string;
 }
 
 const TIMESTAMP_TOKEN = "{{timestamp}}";
@@ -14,7 +22,7 @@ export const DEFAULT_TEXT_COMMANDS: TextCommand[] = [
   { phrase: "new paragraph", replacement: "\n\n", aliases: ["insert paragraph"] },
   { phrase: "new bullet", replacement: "\n- ", aliases: ["bullet point"] },
   { phrase: "comma", replacement: ", " },
-  { phrase: "period", replacement: ". " },
+  { phrase: "period", replacement: ". ", aliases: ["full stop"] },
   { phrase: "question mark", replacement: "? " },
   { phrase: "exclamation mark", replacement: "! " },
   { phrase: "colon", replacement: ": " },
@@ -82,14 +90,16 @@ function resolveReplacement(replacement: string, now: Date): string {
 }
 
 function normalizeSpacing(text: string): string {
-  return text
-    .replace(/\s+([,.;:!?])/g, "$1")
+  const normalized = text
+    .replace(/[ \t]+([,.;:!?])/g, "$1")
     .replace(/([(])\s+/g, "$1")
     .replace(/\s+([)])/g, "$1")
-    .replace(/[ \t]*\n[ \t]*/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/ {2,}/g, " ")
-    .trimEnd();
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/ {2,}/g, " ");
+
+  return normalized.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function getActiveCommands(settings: Settings): TextCommand[] {
@@ -114,12 +124,13 @@ export function applyTextCommands(
       const phrases = [command.phrase, ...(command.aliases ?? [])];
       const replacement = resolveReplacement(command.replacement, now);
 
-      return phrases.map((phrase) => ({
+      return phrases.map((phrase): NormalizedTextCommand => ({
         phrase: normalizePhrase(phrase),
         replacement,
+        displayPhrase: phrase,
       }));
     })
-    .filter((command) => command.phrase.length > 0)
+    .filter((command): command is NormalizedTextCommand => command.phrase.length > 0)
     .sort((a, b) => b.phrase.length - a.phrase.length);
 
   if (commands.length === 0) {
@@ -127,13 +138,25 @@ export function applyTextCommands(
   }
 
   let output = input;
+  const shouldLog = isDebugLoggingEnabled();
   for (const command of commands) {
     const escapedPhrase = escapeRegex(command.phrase).replace(/\ /g, "\\s+");
     const pattern = new RegExp(
       `(^|[\\s(\\[{\"'])${escapedPhrase}(?=$|[\\s.,!?;:)]|[\"'])`,
       "gi"
     );
-    output = output.replace(pattern, (_match, prefix: string) => {
+    output = output.replace(pattern, (match, prefix: string) => {
+      if (shouldLog) {
+        const matchedPhrase = match.slice(prefix.length);
+        const cleanedMatch = matchedPhrase.trim().length
+          ? matchedPhrase.trim()
+          : matchedPhrase || command.displayPhrase;
+        debugLog(
+          `Text command "${command.displayPhrase}" matched "${escapeWhitespaceForLog(cleanedMatch)}" and replaced it with "${escapeWhitespaceForLog(command.replacement)}"`,
+          "INFO"
+        );
+      }
+
       return `${prefix}${command.replacement}`;
     });
   }

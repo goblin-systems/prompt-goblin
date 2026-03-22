@@ -112,6 +112,7 @@ function createDocumentStub() {
     "silence-timeout",
     "language-select",
     "target-language-select",
+    "line-break-mode-select",
     "reset-defaults-btn",
     "app-toast",
     "window-minimize-btn",

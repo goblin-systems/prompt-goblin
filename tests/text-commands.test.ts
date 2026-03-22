@@ -14,6 +14,20 @@ describe("text commands", () => {
     expect(output).toBe("hello, world\n\n- first item.");
   });
 
+  test("preserves blank line for new paragraph with spaced input", () => {
+    const settings = getDefaultSettings();
+    const output = applyTextCommands(" 1 2 3 NEW PARAGRAPH 456", settings);
+
+    expect(output).toBe("1 2 3\n\n456");
+  });
+
+  test("retains blank line even when followed by punctuation command", () => {
+    const settings = getDefaultSettings();
+    const output = applyTextCommands("intro new paragraph period", settings);
+
+    expect(output).toBe("intro\n\n.");
+  });
+
   test("expands insert timestamp command", () => {
     const settings = getDefaultSettings();
     const output = applyTextCommands(

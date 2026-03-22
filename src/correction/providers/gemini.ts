@@ -1,4 +1,5 @@
 import type { CorrectionRuntime } from "../types";
+import { buildCorrectionUserPrompt } from "../prompt";
 
 type ModelListResponse = {
   models?: Array<{
@@ -73,38 +74,6 @@ function compareGeminiCorrectionPriority(left: string, right: string): number {
   };
 
   return score(left) - score(right) || left.localeCompare(right);
-}
-
-function buildCorrectionPrompt(
-  transcript: string,
-  sourceLanguage: string,
-  targetLanguage: string
-): string {
-  const sourceLanguageInstruction =
-    !sourceLanguage || sourceLanguage === "auto"
-      ? "The source language may vary, so infer it from the transcript."
-      : `The source language is ${sourceLanguage}.`;
-  const shouldTranslate = !!targetLanguage.trim();
-  const outputLanguageInstruction = shouldTranslate
-    ? `Translate the corrected transcript into ${targetLanguage.trim()}. Your final output must be entirely in ${targetLanguage.trim()}.`
-    : "Keep the corrected transcript in the original language.";
-
-  return [
-    "You are cleaning up speech-to-text output before it is typed into another app.",
-    "Correct obvious transcription mistakes, casing, and word boundaries.",
-    shouldTranslate
-      ? "If the user dictated text in another language, first understand the intended meaning, then produce a natural translation in the target language."
-      : "Do not translate unless explicitly instructed.",
-    "Do not add commentary, quotes, markdown, or explanations.",
-    "Preserve the user's wording and meaning as closely as possible.",
-    "Very important: preserve spoken command phrases exactly when they appear to be intentional dictation commands, such as comma, period, full stop, question mark, exclamation mark, colon, semicolon, quote, open quote, close quote, apostrophe, new line, new paragraph, tab, open bracket, close bracket, open parenthesis, close parenthesis, open brace, close brace, slash, backslash, dash, underscore, plus, equals.",
-    "Do not convert those command phrases into punctuation. Leave them as words so a later text-command pass can handle them.",
-    sourceLanguageInstruction,
-    outputLanguageInstruction,
-    "Return only the final corrected transcript text.",
-    "",
-    transcript,
-  ].join("\n");
 }
 
 async function fetchGeminiCorrectionModels(apiKey: string): Promise<string[]> {
@@ -203,7 +172,7 @@ async function correctGeminiText(
         contents: [
           {
             role: "user",
-            parts: [{ text: buildCorrectionPrompt(transcript, sourceLanguage, targetLanguage) }],
+            parts: [{ text: buildCorrectionUserPrompt(transcript, sourceLanguage, targetLanguage) }],
           },
         ],
       }),

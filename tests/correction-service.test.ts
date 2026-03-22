@@ -5,6 +5,7 @@ import {
   getCorrectionSelectedModel,
   isTranscriptionCorrectionEnabled,
 } from "../src/correction/service";
+import { buildCorrectionPromptParts, buildCorrectionUserPrompt } from "../src/correction/prompt";
 import { getDefaultSettings } from "../src/settings";
 
 describe("correction service", () => {
@@ -26,5 +27,22 @@ describe("correction service", () => {
 
     expect(getCorrectionSelectedModel(settings, "gemini")).toBe("gemini-2.5-flash");
     expect(getCorrectionSelectedModel(settings, "openai")).toBe("gpt-4.1-mini");
+  });
+
+  test("builds shared correction prompt parts for provider runtimes", () => {
+    const prompt = buildCorrectionPromptParts("bonjour le monde", "auto", "English");
+
+    expect(prompt.input).toBe("bonjour le monde");
+    expect(prompt.instructions).toContain("Translate the corrected transcript into English.");
+    expect(prompt.instructions).toContain(
+      "Do not convert those command phrases into punctuation or symbols."
+    );
+  });
+
+  test("builds a provider-agnostic user prompt from shared prompt parts", () => {
+    const prompt = buildCorrectionUserPrompt("hello world", "en", "");
+
+    expect(prompt).toContain("The source language is en.");
+    expect(prompt).toEndWith("\n\nhello world");
   });
 });

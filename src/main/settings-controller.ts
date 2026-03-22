@@ -3,6 +3,7 @@ import {
   getDefaultSettings,
   getProviderApiKey,
   saveSettings,
+  type LineBreakMode,
   type Settings,
   type SttProvider,
 } from "../settings";
@@ -25,6 +26,7 @@ export interface SettingsFormSnapshot {
   silenceTimeoutSeconds: string;
   language: string;
   targetLanguage: string;
+  lineBreakMode: LineBreakMode;
 }
 
 export interface AutosaveStatus {
@@ -111,6 +113,7 @@ export function buildSettingsFromForm(
     autoStopSilenceMs,
     language: form.language,
     targetLanguage: form.targetLanguage,
+    lineBreakMode: form.lineBreakMode,
   };
 
   nextSettings.providers[activeProvider].apiKey = form.apiKey.trim();

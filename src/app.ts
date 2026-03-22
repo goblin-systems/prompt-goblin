@@ -20,6 +20,7 @@ import {
   getCorrectionSelectedModel,
   isTranscriptionCorrectionEnabled,
 } from "./correction/service";
+import { processIncrementalTranscriptUpdate } from "./incremental-typing";
 import {
   createLiveTranscriber,
   getProviderApiKey,
@@ -29,6 +30,7 @@ import {
 } from "./stt/service";
 import type { LiveTranscriber } from "./stt/types";
 import { applyTextCommands, getCommandTailGuardChars } from "./text-commands";
+import { escapeWhitespaceForLog } from "./string-utils";
 
 let isRecording = false;
 let settings: Settings;
@@ -223,6 +225,10 @@ function processFinalTranscriptForTyping(text: string): string {
   return applyTextCommands(text, settings).trim();
 }
 
+function typeText(text: string) {
+  return invoke("type_text", { text, lineBreakMode: settings.lineBreakMode });
+}
+
 function buildModelCandidates(preferredModel: string, fallbackModels: string[]): string[] {
   const unique = new Set<string>();
   for (const model of [preferredModel, ...fallbackModels]) {
@@ -320,16 +326,18 @@ function emitOverlayProcessingState(label: string): Promise<void> {
 }
 
 function processIncrementalTranscriptForTyping(text: string, isFinal: boolean): string {
-  const stableRawText = isFinal
-    ? text
-    : text.slice(0, Math.max(0, text.length - COMMAND_TAIL_GUARD_CHARS));
+  const update = processIncrementalTranscriptUpdate(
+    text,
+    isFinal,
+    settings,
+    COMMAND_TAIL_GUARD_CHARS,
+    { lastTypedLength, latestRawTranscript }
+  );
 
-  const processedStableText = applyTextCommands(stableRawText, settings);
-  const newText = processedStableText.slice(lastTypedLength);
-  lastTypedLength = processedStableText.length;
-  latestRawTranscript = text;
+  lastTypedLength = update.lastTypedLength;
+  latestRawTranscript = update.latestRawTranscript;
 
-  return newText;
+  return update.newText;
 }
 
 /**
@@ -358,7 +366,7 @@ function flushIncrementalTail() {
     "INFO"
   );
 
-  invoke("type_text", { text: tailText }).catch((err) => {
+  typeText(tailText).catch((err) => {
     incrementalTypeFailureCount += 1;
     debugLog(
       `Incremental tail flush type failed: ${String(err)}`,
@@ -543,10 +551,10 @@ async function startRecording() {
   }
   transcriber.resetTranscript();
 
-  debugLog(
-    `Starting recording: device='${settings.microphoneDeviceId}', loudness=${settings.recordingLoudness}%, typingMode='${settings.typingMode}', autoStop=${settings.autoStopOnSilence}, silenceMs=${settings.autoStopSilenceMs}`,
-    "INFO"
-  );
+    debugLog(
+      `Starting recording: device='${settings.microphoneDeviceId}', loudness=${settings.recordingLoudness}%, typingMode='${settings.typingMode}', lineBreakMode='${settings.lineBreakMode}', autoStop=${settings.autoStopOnSilence}, silenceMs=${settings.autoStopSilenceMs}`,
+      "INFO"
+    );
 
   // Show overlay in loading state immediately
   try {
@@ -657,13 +665,16 @@ async function stopRecording() {
     "INFO"
   );
   if (finalText) {
-    debugLog(`Transcript preview: "${previewText(finalText)}"`, "INFO");
+    debugLog(
+      `Transcript preview: "${previewText(finalText)}" (raw: "${escapeWhitespaceForLog(finalText)}")`,
+      "INFO"
+    );
   } else {
     debugLog("Transcript is empty after stop", "WARN");
   }
   if (finalText && settings.typingMode === "all_at_once") {
     try {
-      await invoke("type_text", { text: finalText });
+      await typeText(finalText);
       debugLog(`Typed final transcript (${finalText.length} chars)`, "INFO");
     } catch (err) {
       console.error("Failed to type text:", err);
@@ -675,7 +686,7 @@ async function stopRecording() {
     const tailText = processIncrementalTranscriptForTyping(latestRawTranscript, true);
     if (tailText) {
       try {
-        await invoke("type_text", { text: tailText });
+        await typeText(tailText);
         incrementalTypeCallCount += 1;
         incrementalTypeCharCount += tailText.length;
       } catch (err) {
@@ -846,7 +857,7 @@ function onTranscript(text: string, isFinal: boolean) {
       // In incremental mode, we type new characters as they arrive
       // We don't use backspaces for now since transcription is append-only
       // from the inputAudioTranscription stream
-      invoke("type_text", { text: newText })
+      typeText(newText)
         .then(() => {
           if (isDebugLoggingEnabled()) {
             debugLog(

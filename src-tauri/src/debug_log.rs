@@ -66,17 +66,26 @@ pub fn write_debug_log(
     level: String,
     message: String,
 ) -> Result<(), String> {
+    write_debug_log_message(&app, &state, &level, &message)
+}
+
+pub fn write_debug_log_message(
+    app: &AppHandle,
+    state: &DebugLogState,
+    level: &str,
+    message: &str,
+) -> Result<(), String> {
     if !state.is_enabled() {
         return Ok(());
     }
 
-    let path = resolve_log_file_path(&app)?;
+    let path = resolve_log_file_path(app)?;
     let _guard = state
         .write_lock
         .lock()
         .map_err(|_| "Failed to lock debug log writer".to_string())?;
 
-    append_log_line(&path, &level, &message)?;
+    append_log_line(&path, level, message)?;
     prune_log_entries(&path)
 }
 

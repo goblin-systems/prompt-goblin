@@ -48,6 +48,7 @@ export interface MainDom {
   silenceTimeoutInput: HTMLInputElement;
   languageSelect: HTMLSelectElement;
   targetLanguageSelect: HTMLSelectElement;
+  lineBreakModeSelect: HTMLSelectElement;
   resetDefaultsBtn: HTMLButtonElement;
   appToast: HTMLElement;
   windowMinimizeBtn: HTMLButtonElement | null;
@@ -111,6 +112,7 @@ export function getMainDom(doc: Document): MainDom {
     silenceTimeoutInput: byId<HTMLInputElement>(doc, "silence-timeout"),
     languageSelect: byId<HTMLSelectElement>(doc, "language-select"),
     targetLanguageSelect: byId<HTMLSelectElement>(doc, "target-language-select"),
+    lineBreakModeSelect: byId<HTMLSelectElement>(doc, "line-break-mode-select"),
     resetDefaultsBtn: byId<HTMLButtonElement>(doc, "reset-defaults-btn"),
     appToast: byId<HTMLElement>(doc, "app-toast"),
     windowMinimizeBtn: byIdOptional<HTMLButtonElement>(doc, "window-minimize-btn"),
@@ -157,6 +159,7 @@ export function populateUI(dom: MainDom, settings: Settings) {
   dom.silenceTimeoutInput.value = String(settings.autoStopSilenceMs / 1000);
   dom.languageSelect.value = settings.language;
   dom.targetLanguageSelect.value = settings.targetLanguage;
+  dom.lineBreakModeSelect.value = settings.lineBreakMode;
   dom.recordingLoudnessInput.value = String(settings.recordingLoudness);
   dom.recordingLoudnessValue.textContent = `${Math.round(settings.recordingLoudness)}%`;
 }
