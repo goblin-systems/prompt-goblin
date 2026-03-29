@@ -121,6 +121,7 @@ function createDocumentStub() {
     "app-toast",
     "window-minimize-btn",
     "window-close-btn",
+    "recording-mode-hint",
   ];
 
   for (const id of ids) {
@@ -136,6 +137,7 @@ function createDocumentStub() {
   elements.set("connection-status", connectionStatus);
 
   const typingModeRadios = [{ checked: false, value: "incremental" }, { checked: false, value: "all_at_once" }];
+  const recordingModeRadios = [{ checked: false, value: "toggle" }, { checked: false, value: "push_to_talk" }];
 
   return {
     doc: {
@@ -146,11 +148,15 @@ function createDocumentStub() {
         if (selector === 'input[name="typing-mode"]') {
           return typingModeRadios;
         }
+        if (selector === 'input[name="recording-mode"]') {
+          return recordingModeRadios;
+        }
         return [];
       },
     } as unknown as Document,
     elements,
     typingModeRadios,
+    recordingModeRadios,
     statusText,
   };
 }

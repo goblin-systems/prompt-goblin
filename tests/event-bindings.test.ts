@@ -21,6 +21,8 @@ function createEmitterElement<T extends object>(initial: T) {
 function createDom(): MainDom {
   const typingModeOne = createEmitterElement({ value: "incremental" });
   const typingModeTwo = createEmitterElement({ value: "all_at_once" });
+  const recordingModeToggle = createEmitterElement({ value: "toggle" });
+  const recordingModePtt = createEmitterElement({ value: "push_to_talk" });
 
   return {
     sttProviderSelect: createEmitterElement({}) as any,
@@ -52,6 +54,8 @@ function createDom(): MainDom {
     testApiKeyBtn: createEmitterElement({ disabled: false }) as any,
     typingModeRadios: [typingModeOne, typingModeTwo] as any,
     typingModeHint: {} as any,
+    recordingModeRadios: [recordingModeToggle, recordingModePtt] as any,
+    recordingModeHint: { textContent: "" } as any,
     transcriptCorrectionCheckbox: createEmitterElement({ checked: false }) as any,
     transcriptCorrectionHint: {} as any,
     transcriptCorrectionControls: {} as any,
@@ -99,6 +103,7 @@ describe("event bindings", () => {
       micTestController,
       settingsController,
       updateTypingModeHint: mock(() => {}),
+      updateRecordingModeHint: mock(() => {}),
       updateTranscriptCorrectionUI: mock(() => {}),
       updateRecordingLoudnessValue: mock(() => {}),
       updateListeningDingVolumeValue: mock(() => {}),
@@ -107,6 +112,8 @@ describe("event bindings", () => {
       refreshLiveModelList,
       refreshCorrectionModelList,
       refreshMicrophoneList,
+      handleOpenAIOAuthLogin: mock(async () => {}),
+      handleOpenAIOAuthLogout: mock(() => {}),
       handleResetDefaults,
       handleOpenDebugFolder,
       cycleWaveformStyle: mock(() => {}),
@@ -164,6 +171,7 @@ describe("event bindings", () => {
       micTestController: { toggle: async () => {} } as any,
       settingsController,
       updateTypingModeHint,
+      updateRecordingModeHint: mock(() => {}),
       updateTranscriptCorrectionUI,
       updateRecordingLoudnessValue,
       updateListeningDingVolumeValue,
@@ -172,6 +180,8 @@ describe("event bindings", () => {
       refreshLiveModelList: async () => {},
       refreshCorrectionModelList: async () => {},
       refreshMicrophoneList: async () => {},
+      handleOpenAIOAuthLogin: async () => {},
+      handleOpenAIOAuthLogout: () => {},
       handleResetDefaults: async () => {},
       handleOpenDebugFolder: async () => {},
       cycleWaveformStyle,

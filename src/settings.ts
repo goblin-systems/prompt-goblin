@@ -82,6 +82,7 @@ export interface Settings {
   waveformEasterEggUnlocked: boolean;
   debugLoggingEnabled: boolean;
   typingMode: "all_at_once" | "incremental";
+  recordingMode: "toggle" | "push_to_talk";
   autoStopOnSilence: boolean;
   autoStopSilenceMs: number;
   language: string;
@@ -135,6 +136,7 @@ const DEFAULTS: Settings = {
   waveformEasterEggUnlocked: false,
   debugLoggingEnabled: false,
   typingMode: "incremental",
+  recordingMode: "toggle",
   autoStopOnSilence: true,
   autoStopSilenceMs: 4000,
   language: "auto",
@@ -344,6 +346,11 @@ export async function loadSettings(): Promise<Settings> {
   const hotkey = await s.get<string>("hotkey");
   if (hotkey !== undefined && hotkey !== null) settings.hotkey = hotkey;
 
+  const recordingMode = await s.get<string>("recordingMode");
+  if (recordingMode === "toggle" || recordingMode === "push_to_talk") {
+    settings.recordingMode = recordingMode;
+  }
+
   const microphoneDeviceId = await s.get<string>("microphoneDeviceId");
   if (microphoneDeviceId !== undefined && microphoneDeviceId !== null) {
     settings.microphoneDeviceId = microphoneDeviceId;
@@ -508,6 +515,7 @@ export async function saveSettings(settings: Settings): Promise<void> {
   await s.set("modelCache", settings.providers.gemini.modelCache);
   await s.set("debugLoggingEnabled", settings.debugLoggingEnabled);
   await s.set("typingMode", settings.typingMode);
+  await s.set("recordingMode", settings.recordingMode);
   await s.set("autoStopOnSilence", settings.autoStopOnSilence);
   await s.set("autoStopSilenceMs", settings.autoStopSilenceMs);
   await s.set("language", settings.language);

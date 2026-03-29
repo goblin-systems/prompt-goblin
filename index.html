@@ -140,7 +140,19 @@
               />
             </div>
           </div>
-          <p class="hint">Press the hotkey to start or stop recording.</p>
+          <p class="hint">Global keyboard shortcut to control recording. Press Escape to cancel and discard the current recording.</p>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="recording-mode" value="toggle" checked />
+              <span>Toggle</span>
+              <span class="badge default">default</span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="recording-mode" value="push_to_talk" />
+              <span>Push to talk</span>
+            </label>
+          </div>
+          <p class="hint" id="recording-mode-hint">Press the hotkey once to start, press again to stop.</p>
         </section>
 
         <section class="settings-section">
@@ -311,7 +323,6 @@
           <label class="checkbox-label">
             <input type="checkbox" id="auto-stop-checkbox" checked />
             <span>Auto-stop on silence</span>
-            <span class="badge beta">beta</span>
           </label>
           <label class="inline-field" id="silence-timeout-field" for="silence-timeout">
             <span>Silence timeout</span>
@@ -325,6 +336,7 @@
             />
             <span class="unit">seconds</span>
           </label>
+          <p class="hint">Prompt Goblin stops recording after this much silence. Speech resets the timer. Manual stop always works regardless of this setting.</p>
         </section>
 
         <section class="settings-section">

@@ -11,6 +11,7 @@ export interface EventBindingOptions {
   micTestController: MicTestController;
   settingsController: SettingsController;
   updateTypingModeHint: () => void;
+  updateRecordingModeHint: () => void;
   updateTranscriptCorrectionUI: () => void;
   updateRecordingLoudnessValue: () => void;
   updateListeningDingVolumeValue: () => void;
@@ -37,6 +38,7 @@ export function setupMainEventBindings(options: EventBindingOptions) {
     micTestController,
     settingsController,
     updateTypingModeHint,
+    updateRecordingModeHint,
     updateTranscriptCorrectionUI,
     updateRecordingLoudnessValue,
     updateListeningDingVolumeValue,
@@ -64,6 +66,13 @@ export function setupMainEventBindings(options: EventBindingOptions) {
     radio.addEventListener("change", () => {
       updateTypingModeHint();
       updateTranscriptCorrectionUI();
+      settingsController.scheduleAutosave(0);
+    });
+  });
+
+  dom.recordingModeRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      updateRecordingModeHint();
       settingsController.scheduleAutosave(0);
     });
   });

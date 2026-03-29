@@ -55,6 +55,8 @@ export interface MainDom {
   testApiKeyBtn: HTMLButtonElement;
   typingModeRadios: NodeListOf<HTMLInputElement>;
   typingModeHint: HTMLElement;
+  recordingModeRadios: NodeListOf<HTMLInputElement>;
+  recordingModeHint: HTMLElement;
   transcriptCorrectionCheckbox: HTMLInputElement;
   transcriptCorrectionHint: HTMLElement;
   transcriptCorrectionControls: HTMLElement;
@@ -145,6 +147,10 @@ export function getMainDom(doc: Document): MainDom {
       'input[name="typing-mode"]'
     ) as NodeListOf<HTMLInputElement>,
     typingModeHint: byId<HTMLElement>("typing-mode-hint", doc),
+    recordingModeRadios: doc.querySelectorAll(
+      'input[name="recording-mode"]'
+    ) as NodeListOf<HTMLInputElement>,
+    recordingModeHint: byId<HTMLElement>("recording-mode-hint", doc),
     transcriptCorrectionCheckbox: byId<HTMLInputElement>("transcript-correction-checkbox", doc),
     transcriptCorrectionHint: byId<HTMLElement>("transcript-correction-hint", doc),
     transcriptCorrectionControls: byId<HTMLElement>("transcript-correction-controls", doc),
@@ -197,6 +203,10 @@ export function populateUI(dom: MainDom, settings: Settings) {
     radio.checked = radio.value === settings.typingMode;
   });
   updateTypingModeHint(dom, settings.typingMode);
+
+  dom.recordingModeRadios.forEach((radio) => {
+    radio.checked = radio.value === settings.recordingMode;
+  });
 
   dom.transcriptCorrectionCheckbox.checked = settings.transcriptionCorrection.enabled;
   const correctionModels =
@@ -331,4 +341,13 @@ export function updateConnectionStatus(
       dom.connectionStatus.classList.add("disconnected");
       statusText.textContent = "Not configured";
   }
+}
+
+export function getSelectedRecordingMode(dom: MainDom): "toggle" | "push_to_talk" {
+  for (const radio of dom.recordingModeRadios) {
+    if (radio.checked && (radio.value === "toggle" || radio.value === "push_to_talk")) {
+      return radio.value;
+    }
+  }
+  return "toggle";
 }

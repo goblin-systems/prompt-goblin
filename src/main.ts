@@ -18,6 +18,7 @@ import {
 import { getCorrectionLabel, getCorrectionRuntime } from "./correction/service";
 import {
   getMainDom,
+  getSelectedRecordingMode,
   populateCorrectionModelOptions as renderCorrectionModelOptions,
   populateLiveModelOptions as renderLiveModelOptions,
   populateUI as renderUI,
@@ -260,6 +261,17 @@ function updateTypingModeHint() {
   renderTypingModeHint(dom, getSelectedTypingMode());
 }
 
+function updateRecordingModeHint() {
+  const mode = getSelectedRecordingMode(dom);
+  if (mode === "push_to_talk") {
+    dom.recordingModeHint.textContent =
+      "Hold the hotkey to record, release to stop and type.";
+  } else {
+    dom.recordingModeHint.textContent =
+      "Press the hotkey once to start, press again to stop.";
+  }
+}
+
 function readFormSnapshot(): SettingsFormSnapshot {
   return {
     apiKey: dom.apiKeyInput.value,
@@ -271,6 +283,7 @@ function readFormSnapshot(): SettingsFormSnapshot {
     recordingLoudnessPercent: dom.recordingLoudnessInput.value,
     debugLoggingEnabled: dom.debugLoggingCheckbox.checked,
     typingMode: getSelectedTypingMode(),
+    recordingMode: getSelectedRecordingMode(dom),
     transcriptCorrectionEnabled: dom.transcriptCorrectionCheckbox.checked,
     autoStopOnSilence: dom.autoStopCheckbox.checked,
     silenceTimeoutSeconds: dom.silenceTimeoutInput.value,
@@ -510,6 +523,7 @@ function populateUI(settings: Settings) {
   updateRecordingLoudnessValue();
   updateListeningDingVolumeValue();
   updateTypingModeHint();
+  updateRecordingModeHint();
   updateWaveToolButtons();
   updateTranscriptCorrectionUI();
 }
@@ -752,6 +766,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     micTestController,
     settingsController,
     updateTypingModeHint,
+    updateRecordingModeHint,
     updateTranscriptCorrectionUI,
     updateRecordingLoudnessValue,
     updateListeningDingVolumeValue,

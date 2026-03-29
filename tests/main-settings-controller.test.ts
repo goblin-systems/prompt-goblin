@@ -17,6 +17,7 @@ function createForm(overrides: Partial<SettingsFormSnapshot> = {}): SettingsForm
     recordingLoudnessPercent: "175",
     debugLoggingEnabled: true,
     typingMode: "all_at_once",
+    recordingMode: "toggle",
     transcriptCorrectionEnabled: true,
     autoStopOnSilence: false,
     silenceTimeoutSeconds: "5.5",

@@ -37,6 +37,7 @@ let settings: Settings;
 let transcriber: LiveTranscriber = createLiveTranscriber("gemini");
 let activeProvider: Settings["sttProvider"] = "gemini";
 let overlayListeningReady = false;
+let pttKeyHeld = false;
 
 // Silence detection state
 let lastSpeechTime = 0;
@@ -460,7 +461,7 @@ export async function initApp() {
     }
 
     // Silence detection for auto-stop
-    if (settings.autoStopOnSilence && isRecording) {
+    if (settings.autoStopOnSilence && isRecording && settings.recordingMode !== "push_to_talk") {
       // RMS threshold for "speech" vs "silence" (tuned for typical mic input)
       const speechThreshold = 0.02;
       if (rms > speechThreshold) {
@@ -472,7 +473,7 @@ export async function initApp() {
       } else if (!silenceTimer && lastSpeechTime > 0) {
         // Only start silence timer after we've detected at least some speech
         silenceTimer = setTimeout(() => {
-          if (isRecording) {
+          if (isRecording && !suppressAutoStopForRecovery) {
             stopRecording();
           }
         }, settings.autoStopSilenceMs);
@@ -482,6 +483,21 @@ export async function initApp() {
 
   // Register global hotkey
   await registerHotkey(settings.hotkey);
+
+  // Register Escape as cancel-recording key
+  try {
+    const escAlreadyRegistered = await isRegistered("Escape");
+    if (escAlreadyRegistered) {
+      await unregister("Escape");
+    }
+    await register("Escape", (event) => {
+      if (event.state === "Pressed" && isRecording) {
+        void cancelRecording();
+      }
+    });
+  } catch (err) {
+    console.error("Failed to register Escape cancel hotkey:", err);
+  }
 }
 
 async function registerHotkey(hotkey: string) {
@@ -491,8 +507,22 @@ async function registerHotkey(hotkey: string) {
       await unregister(hotkey);
     }
     await register(hotkey, (event) => {
-      if (event.state === "Pressed") {
-        toggleRecording();
+      if (settings.recordingMode === "push_to_talk") {
+        if (event.state === "Pressed") {
+          if (!isRecording && !pttKeyHeld) {
+            pttKeyHeld = true;
+            void startRecording();
+          }
+        } else if (event.state === "Released") {
+          pttKeyHeld = false;
+          if (isRecording) {
+            void stopRecording();
+          }
+        }
+      } else {
+        if (event.state === "Pressed") {
+          void toggleRecording();
+        }
       }
     });
   } catch (err) {
@@ -747,6 +777,79 @@ async function stopRecording() {
   overlayListeningReady = false;
 }
 
+async function cancelRecording() {
+  if (!isRecording) {
+    return;
+  }
+
+  isRecording = false;
+  debugLog("Recording cancelled by user — transcript discarded", "INFO");
+
+  // Clear timers
+  if (silenceTimer) {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+  if (incrementalTailFlushTimer) {
+    clearTimeout(incrementalTailFlushTimer);
+    incrementalTailFlushTimer = null;
+  }
+
+  // Stop audio capture
+  try {
+    await invoke("stop_recording");
+  } catch (err) {
+    debugLog(`Failed to stop recording on cancel: ${String(err)}`, "ERROR");
+  }
+
+  // Disconnect without waiting for pending transcript
+  await transcriber.disconnect();
+
+  // Emit cancelled event to overlay
+  try {
+    const overlay = await WebviewWindow.getByLabel("overlay");
+    if (overlay) {
+      await overlay.emit("recording-cancelled", {});
+      setTimeout(async () => {
+        try {
+          await overlay.hide();
+        } catch {
+          // ignore
+        }
+      }, 300);
+    }
+  } catch {
+    // best-effort
+  }
+
+  // Reset counters (same as stopRecording)
+  recordingStartedAt = 0;
+  recordingChunkCount = 0;
+  recordingApproxAudioBytes = 0;
+  lastAudioProgressLogAt = 0;
+  lastTranscriptProgressChars = 0;
+  lastTranscriptEventAt = 0;
+  lastTranscriptStallWarnAt = 0;
+  incrementalTypeCallCount = 0;
+  incrementalTypeCharCount = 0;
+  incrementalTypeFailureCount = 0;
+  lastAudioTurnBoundaryAt = 0;
+  audioTurnBoundaryCount = 0;
+  recoveryInProgress = false;
+  suppressAutoStopForRecovery = false;
+  lastRecoveryAttemptAt = 0;
+  recoveryAttemptCount = 0;
+  recoverySuccessCount = 0;
+  recoveryFailureCount = 0;
+  latestMicRms = 0;
+  connectedAt = 0;
+  firstTranscriptAt = 0;
+  estimatedConfidencePct = 0;
+  hudLastEmitAt = 0;
+  overlayListeningReady = false;
+  pttKeyHeld = false;
+}
+
 async function recoverFromTranscriptStall(stalledForMs: number) {
   if (!isRecording || recoveryInProgress) {
     return;
@@ -938,6 +1041,7 @@ function onStatus(
 
 export function reloadSettings(newSettings: Settings) {
   const oldHotkey = settings.hotkey;
+  const oldRecordingMode = settings.recordingMode;
   settings = newSettings;
 
   void emitOverlayEvent("overlay-settings-updated", {
@@ -952,7 +1056,7 @@ export function reloadSettings(newSettings: Settings) {
   configureTranscriberFromSettings();
 
   // Re-register hotkey if changed
-  if (oldHotkey !== settings.hotkey) {
+  if (oldHotkey !== settings.hotkey || oldRecordingMode !== settings.recordingMode) {
     unregister(oldHotkey).then(() => registerHotkey(settings.hotkey));
   }
 }

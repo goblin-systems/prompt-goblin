@@ -459,6 +459,19 @@ listen("recording-stopped", () => {
   stopTimer();
 });
 
+listen("recording-cancelled", () => {
+  if (listeningDelayTimer) {
+    clearTimeout(listeningDelayTimer);
+    listeningDelayTimer = null;
+  }
+
+  overlayRecordingActive = false;
+  targetMicLevel = 0;
+  resetHud();
+  setOverlayState("done", "Cancelled");
+  stopTimer();
+});
+
 listen<{
   playListeningDing?: boolean;
   listeningDingSound?: string;

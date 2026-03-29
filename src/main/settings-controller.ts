@@ -23,6 +23,7 @@ export interface SettingsFormSnapshot {
   recordingLoudnessPercent: string;
   debugLoggingEnabled: boolean;
   typingMode: Settings["typingMode"];
+  recordingMode: Settings["recordingMode"];
   transcriptCorrectionEnabled: boolean;
   autoStopOnSilence: boolean;
   silenceTimeoutSeconds: string;
@@ -122,6 +123,7 @@ export function buildSettingsFromForm(
     waveformEasterEggUnlocked: currentSettings.waveformEasterEggUnlocked,
     debugLoggingEnabled: form.debugLoggingEnabled,
     typingMode: form.typingMode,
+    recordingMode: form.recordingMode,
     autoStopOnSilence: form.autoStopOnSilence,
     autoStopSilenceMs,
     language: form.language,
