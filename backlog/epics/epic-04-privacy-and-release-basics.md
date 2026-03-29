@@ -4,7 +4,7 @@ Release target: `R0.2`
 Priority: `P1`
 Primary owner: Engineering
 Supporting owners: Product, TPM, QA, Security
-Status: Planned
+Status: Implemented
 
 ## Outcome
 
