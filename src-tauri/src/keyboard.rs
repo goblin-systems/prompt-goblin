@@ -342,9 +342,15 @@ mod macos_cg {
 }
 
 #[cfg(target_os = "macos")]
-fn send_text_native(text: &str) -> Result<(), String> {
+fn send_text_native(text: &str, line_break_mode: LineBreakMode) -> Result<(), String> {
     use macos_cg::*;
     use std::os::raw::c_ulong;
+
+    // Key codes for macOS: Return = 36
+    const K_VK_RETURN: CGKeyCode = 36;
+    // Modifier key codes: Shift = 56, Control = 59
+    const K_VK_SHIFT: CGKeyCode = 56;
+    const K_VK_CONTROL: CGKeyCode = 59;
 
     unsafe {
         if !ensure_accessibility() {
@@ -359,24 +365,70 @@ fn send_text_native(text: &str) -> Result<(), String> {
             return Err("Failed to create CGEventSource".to_string());
         }
 
-        let utf16: Vec<u16> = text.encode_utf16().collect();
-
-        for chunk in utf16.chunks(20) {
-            let key_down = CGEventCreateKeyboardEvent(source, 0, true);
-            if !key_down.is_null() {
-                CGEventKeyboardSetUnicodeString(key_down, chunk.len() as c_ulong, chunk.as_ptr());
-                CGEventPost(K_CG_HID_EVENT_TAP, key_down);
-                CFRelease(key_down);
+        let post_key_down = |vk: CGKeyCode| {
+            let ev = CGEventCreateKeyboardEvent(source, vk, true);
+            if !ev.is_null() {
+                CGEventPost(K_CG_HID_EVENT_TAP, ev);
+                CFRelease(ev);
             }
+        };
 
-            let key_up = CGEventCreateKeyboardEvent(source, 0, false);
-            if !key_up.is_null() {
-                CGEventKeyboardSetUnicodeString(key_up, chunk.len() as c_ulong, chunk.as_ptr());
-                CGEventPost(K_CG_HID_EVENT_TAP, key_up);
-                CFRelease(key_up);
+        let post_key_up = |vk: CGKeyCode| {
+            let ev = CGEventCreateKeyboardEvent(source, vk, false);
+            if !ev.is_null() {
+                CGEventPost(K_CG_HID_EVENT_TAP, ev);
+                CFRelease(ev);
             }
+        };
 
-            thread::sleep(Duration::from_millis(2));
+        for action in build_typing_actions(text) {
+            match action {
+                TypingAction::Text(chunk) => {
+                    let utf16: Vec<u16> = chunk.encode_utf16().collect();
+                    for sub_chunk in utf16.chunks(20) {
+                        let key_down = CGEventCreateKeyboardEvent(source, 0, true);
+                        if !key_down.is_null() {
+                            CGEventKeyboardSetUnicodeString(
+                                key_down,
+                                sub_chunk.len() as c_ulong,
+                                sub_chunk.as_ptr(),
+                            );
+                            CGEventPost(K_CG_HID_EVENT_TAP, key_down);
+                            CFRelease(key_down);
+                        }
+
+                        let key_up = CGEventCreateKeyboardEvent(source, 0, false);
+                        if !key_up.is_null() {
+                            CGEventKeyboardSetUnicodeString(
+                                key_up,
+                                sub_chunk.len() as c_ulong,
+                                sub_chunk.as_ptr(),
+                            );
+                            CGEventPost(K_CG_HID_EVENT_TAP, key_up);
+                            CFRelease(key_up);
+                        }
+
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                }
+                TypingAction::Newline => {
+                    let modifier_vk = match line_break_mode {
+                        LineBreakMode::Enter => None,
+                        LineBreakMode::ShiftEnter => Some(K_VK_SHIFT),
+                        LineBreakMode::CtrlEnter => Some(K_VK_CONTROL),
+                    };
+                    // Hold modifier down, tap Return, release modifier
+                    if let Some(modifier) = modifier_vk {
+                        post_key_down(modifier);
+                    }
+                    post_key_down(K_VK_RETURN);
+                    post_key_up(K_VK_RETURN);
+                    if let Some(modifier) = modifier_vk {
+                        post_key_up(modifier);
+                    }
+                    thread::sleep(Duration::from_millis(NEWLINE_KEY_DELAY_MS));
+                }
+            }
         }
 
         CFRelease(source);

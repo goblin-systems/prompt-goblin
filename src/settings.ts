@@ -154,7 +154,7 @@ const DEFAULTS: Settings = {
   customTextCommands: [],
   holdBeforeType: false,
   holdBeforeTypeTimeoutMs: 0,
-  privacyMode: false,
+  privacyMode: true,
 };
 
 function isListeningDingSound(value: unknown): value is ListeningDingSound {

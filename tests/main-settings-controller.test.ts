@@ -196,9 +196,9 @@ describe("settings controller helpers", () => {
     expect(negativeResult.holdBeforeTypeTimeoutMs).toBe(0);
   });
 
-  test("getDefaultSettings includes privacyMode defaulting to false", () => {
+  test("getDefaultSettings includes privacyMode defaulting to true", () => {
     const defaults = getDefaultSettings();
-    expect(defaults.privacyMode).toBe(false);
+    expect(defaults.privacyMode).toBe(true);
   });
 
   test("buildSettingsFromForm propagates privacyMode from form", () => {
