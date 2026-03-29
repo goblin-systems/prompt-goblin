@@ -348,12 +348,10 @@ fn send_text_native(text: &str) -> Result<(), String> {
 
     unsafe {
         if !ensure_accessibility() {
-            return Err(
-                "Accessibility permission required. \
+            return Err("Accessibility permission required. \
                  Grant access in System Settings > Privacy & Security > Accessibility, \
                  then restart the app."
-                    .to_string(),
-            );
+                .to_string());
         }
 
         let source = CGEventSourceCreate(K_CG_EVENT_SOURCE_STATE_HID);
@@ -366,22 +364,14 @@ fn send_text_native(text: &str) -> Result<(), String> {
         for chunk in utf16.chunks(20) {
             let key_down = CGEventCreateKeyboardEvent(source, 0, true);
             if !key_down.is_null() {
-                CGEventKeyboardSetUnicodeString(
-                    key_down,
-                    chunk.len() as c_ulong,
-                    chunk.as_ptr(),
-                );
+                CGEventKeyboardSetUnicodeString(key_down, chunk.len() as c_ulong, chunk.as_ptr());
                 CGEventPost(K_CG_HID_EVENT_TAP, key_down);
                 CFRelease(key_down);
             }
 
             let key_up = CGEventCreateKeyboardEvent(source, 0, false);
             if !key_up.is_null() {
-                CGEventKeyboardSetUnicodeString(
-                    key_up,
-                    chunk.len() as c_ulong,
-                    chunk.as_ptr(),
-                );
+                CGEventKeyboardSetUnicodeString(key_up, chunk.len() as c_ulong, chunk.as_ptr());
                 CGEventPost(K_CG_HID_EVENT_TAP, key_up);
                 CFRelease(key_up);
             }
@@ -401,12 +391,10 @@ fn send_backspace_native() -> Result<(), String> {
 
     unsafe {
         if !ensure_accessibility() {
-            return Err(
-                "Accessibility permission required. \
+            return Err("Accessibility permission required. \
                  Grant access in System Settings > Privacy & Security > Accessibility, \
                  then restart the app."
-                    .to_string(),
-            );
+                .to_string());
         }
 
         let source = CGEventSourceCreate(K_CG_EVENT_SOURCE_STATE_HID);

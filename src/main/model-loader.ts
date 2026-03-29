@@ -1,6 +1,6 @@
-import type { ProviderModelCache, SttProvider } from "../settings";
+import type { ProviderAuth, ProviderModelCache, SttProvider } from "../settings";
 import { MODEL_CACHE_TTL_MS, isModelCacheFresh, selectPreferredModel } from "./model-cache";
-import { fingerprintApiKey } from "./utils";
+import { fingerprintCredential } from "./utils";
 
 type LogLevel = "INFO" | "WARN" | "ERROR";
 
@@ -20,9 +20,11 @@ export interface RefreshModelListMessages {
 export interface RefreshModelListOptions {
   provider: SttProvider;
   providerLabel: string;
-  apiKey: string;
+  auth: ProviderAuth | null;
+  authIdentity: string;
+  apiKey?: string;
   forceApiRefresh: boolean;
-  fetchModels: (apiKey: string) => Promise<string[]>;
+  fetchModels: (auth: ProviderAuth) => Promise<string[]>;
   getCache: () => ProviderModelCache | null;
   getSelectedModel: () => string;
   getLastKnownGoodModel: () => string;
@@ -42,8 +44,10 @@ export async function refreshModelList(options: RefreshModelListOptions): Promis
   const {
     provider,
     providerLabel,
-    apiKey,
+    auth,
+    authIdentity,
     forceApiRefresh,
+    apiKey,
     fetchModels,
     getCache,
     getSelectedModel,
@@ -60,7 +64,10 @@ export async function refreshModelList(options: RefreshModelListOptions): Promis
     ttlMs = MODEL_CACHE_TTL_MS,
   } = options;
 
-  if (!apiKey) {
+  const resolvedAuth = auth ?? (apiKey ? ({ type: "api_key", token: apiKey } as ProviderAuth) : null);
+  const resolvedIdentity = authIdentity || apiKey || "";
+
+  if (!resolvedAuth || !resolvedIdentity) {
     populateOptions([], "");
     setHint(messages.emptyApiKey);
     onAfterUpdate?.();
@@ -68,7 +75,7 @@ export async function refreshModelList(options: RefreshModelListOptions): Promis
   }
 
   const currentTime = now();
-  const fingerprint = fingerprintApiKey(apiKey);
+  const fingerprint = fingerprintCredential(resolvedIdentity);
   const cache = getCache();
   const cacheIsFresh = isModelCacheFresh(cache, fingerprint, currentTime, ttlMs);
 
@@ -90,7 +97,7 @@ export async function refreshModelList(options: RefreshModelListOptions): Promis
     setHint(messages.fetching(providerLabel));
     log(messages.fetchLog(providerLabel), "INFO");
 
-    const models = await fetchModels(apiKey);
+    const models = await fetchModels(resolvedAuth);
     if (models.length === 0) {
       throw new Error(messages.emptyResult(providerLabel));
     }

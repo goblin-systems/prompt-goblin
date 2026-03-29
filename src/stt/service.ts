@@ -1,4 +1,9 @@
-import type { Settings, SttProvider } from "../settings";
+import {
+  getProviderAuth as getProviderAuthFromSettings,
+  type ProviderAuth,
+  type Settings,
+  type SttProvider,
+} from "../settings";
 import type {
   LivePipelineOptions,
   LiveTranscriber,
@@ -33,6 +38,10 @@ export function createLiveTranscriber(provider: SttProvider): LiveTranscriber {
 
 export function getProviderApiKey(settings: Settings, provider = settings.sttProvider): string {
   return settings.providers[provider].apiKey;
+}
+
+export function getProviderAuth(settings: Settings, provider = settings.sttProvider): ProviderAuth | null {
+  return getProviderAuthFromSettings(settings, provider);
 }
 
 export function getProviderSelectedModel(

@@ -23,7 +23,7 @@ import {
 import { processIncrementalTranscriptUpdate } from "./incremental-typing";
 import {
   createLiveTranscriber,
-  getProviderApiKey,
+  getProviderAuth,
   getProviderFallbackModels,
   getProviderLabel,
   getProviderSelectedModel,
@@ -95,13 +95,13 @@ function ensureTranscriberForProvider() {
 
 function configureTranscriberFromSettings() {
   ensureTranscriberForProvider();
-  const apiKey = getProviderApiKey(settings);
-  if (!apiKey) {
+  const auth = getProviderAuth(settings);
+  if (!auth) {
     return;
   }
 
   transcriber.configure({
-    apiKey,
+    auth,
     language: settings.language,
     preferredModel: getProviderSelectedModel(settings),
     fallbackModels: getProviderFallbackModels(settings),
@@ -245,14 +245,15 @@ async function maybeCorrectFinalTranscript(text: string): Promise<string> {
     return text;
   }
 
-  const apiKey = getProviderApiKey(settings);
+  const auth = getProviderAuth(settings);
   const correctionModel = getCorrectionSelectedModel(settings);
-  if (!apiKey || !correctionModel) {
+  if (!auth || !correctionModel) {
     return text;
   }
 
   const provider = settings.sttProvider;
-  const runtime = getCorrectionRuntime(provider);
+  const authMode = settings.providers.openai.authMode;
+  const runtime = getCorrectionRuntime(provider, authMode);
   const candidates = buildModelCandidates(correctionModel, getCorrectionFallbackModels(settings));
   let lastError: unknown = null;
 
@@ -267,7 +268,7 @@ async function maybeCorrectFinalTranscript(text: string): Promise<string> {
     try {
       const corrected = (
         await runtime.correctText(
-          apiKey,
+          auth,
           candidate,
           text,
           settings.language,
@@ -314,7 +315,7 @@ function getOverlayCorrectionLabel(): string {
 
 function emitOverlayProcessingState(label: string): Promise<void> {
   if (label.startsWith("Correcting")) {
-    emitOverlayHudModel(getCorrectionLabel(settings.sttProvider), getCorrectionSelectedModel(settings));
+    emitOverlayHudModel(getCorrectionLabel(settings.sttProvider, settings.providers.openai.authMode), getCorrectionSelectedModel(settings));
   } else {
     emitOverlayHudModel(providerLabelForLogs(), transcriber.getActiveModel());
   }
@@ -508,10 +509,10 @@ async function toggleRecording() {
 }
 
 async function startRecording() {
-  const providerApiKey = getProviderApiKey(settings);
-  if (!providerApiKey) {
-    console.error("No API key configured");
-    debugLog(`${providerLabelForLogs()} start blocked: API key missing`, "WARN");
+  const providerAuth = getProviderAuth(settings);
+  if (!providerAuth) {
+    console.error("No provider credentials configured");
+    debugLog(`${providerLabelForLogs()} start blocked: credentials missing`, "WARN");
     return;
   }
 

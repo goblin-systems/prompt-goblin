@@ -1,12 +1,12 @@
-import type { SttProvider } from "../settings";
+import type { ProviderAuth, SttProvider } from "../settings";
 
 export interface CorrectionRuntime {
   readonly id: SttProvider;
   readonly label: string;
-  fetchModels(apiKey: string): Promise<string[]>;
-  validateModel(apiKey: string, model: string): Promise<void>;
+  fetchModels(auth: ProviderAuth): Promise<string[]>;
+  validateModel(auth: ProviderAuth, model: string): Promise<void>;
   correctText(
-    apiKey: string,
+    auth: ProviderAuth,
     model: string,
     transcript: string,
     sourceLanguage?: string,

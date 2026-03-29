@@ -14,7 +14,17 @@ export type ConnectionStatus =
 
 export interface MainDom {
   sttProviderSelect: HTMLSelectElement;
+  credentialSectionTitle: HTMLElement;
+  apiKeyControls: HTMLElement;
+  apiKeyInputRow: HTMLElement;
   apiKeyInput: HTMLInputElement;
+  openaiOauthLoginBtn: HTMLButtonElement;
+  openaiOauthLogoutBtn: HTMLButtonElement;
+  openaiOauthStatus: HTMLElement;
+  openaiOauthControls: HTMLElement;
+  openaiDeviceAuthRow: HTMLElement;
+  openaiDeviceUserCode: HTMLElement;
+  openaiDeviceCopyBtn: HTMLButtonElement;
   hotkeyInput: HTMLInputElement;
   liveModelSelect: HTMLSelectElement;
   refreshModelsBtn: HTMLButtonElement;
@@ -37,6 +47,9 @@ export interface MainDom {
   toggleKeyBtn: HTMLButtonElement;
   apiKeyHelpBtn: HTMLButtonElement;
   apiKeyHelpModal: HTMLElement;
+  apiKeyHelpTitle: HTMLElement;
+  apiKeyHelpList: HTMLOListElement;
+  apiKeyHelpHint: HTMLElement;
   closeApiKeyHelpBtn: HTMLButtonElement;
   connectionStatus: HTMLElement;
   testApiKeyBtn: HTMLButtonElement;
@@ -65,8 +78,38 @@ export interface MainDom {
 }
 
 export function getMainDom(doc: Document): MainDom {
+  const createFallbackElement = <T extends HTMLElement>(tag: string): T => {
+    const creator =
+      typeof document !== "undefined" && typeof document.createElement === "function"
+        ? document
+        : null;
+    if (creator) {
+      return creator.createElement(tag) as T;
+    }
+
+    return {
+      hidden: true,
+      disabled: true,
+      textContent: "",
+      addEventListener: () => {},
+    } as unknown as T;
+  };
+
+  const fallbackButton = () => createFallbackElement<HTMLButtonElement>("button");
+  const fallbackDiv = () => createFallbackElement<HTMLElement>("div");
+
   return {
+    credentialSectionTitle: byIdOptional<HTMLElement>("credential-section-title", doc) ?? fallbackDiv(),
+    apiKeyControls: byIdOptional<HTMLElement>("api-key-controls", doc) ?? fallbackDiv(),
+    apiKeyInputRow: byIdOptional<HTMLElement>("api-key-input-row", doc) ?? fallbackDiv(),
     apiKeyInput: byId<HTMLInputElement>("api-key-input", doc),
+    openaiOauthLoginBtn: byIdOptional<HTMLButtonElement>("openai-oauth-login-btn", doc) ?? fallbackButton(),
+    openaiOauthLogoutBtn: byIdOptional<HTMLButtonElement>("openai-oauth-logout-btn", doc) ?? fallbackButton(),
+    openaiOauthStatus: byIdOptional<HTMLElement>("openai-oauth-status", doc) ?? fallbackDiv(),
+    openaiOauthControls: byIdOptional<HTMLElement>("openai-oauth-controls", doc) ?? fallbackDiv(),
+    openaiDeviceAuthRow: byIdOptional<HTMLElement>("openai-device-auth-row", doc) ?? fallbackDiv(),
+    openaiDeviceUserCode: byIdOptional<HTMLElement>("openai-device-user-code", doc) ?? fallbackDiv(),
+    openaiDeviceCopyBtn: byIdOptional<HTMLButtonElement>("openai-device-copy-btn", doc) ?? fallbackButton(),
     sttProviderSelect: byId<HTMLSelectElement>("stt-provider-select", doc),
     hotkeyInput: byId<HTMLInputElement>("hotkey-input", doc),
     liveModelSelect: byId<HTMLSelectElement>("live-model-select", doc),
@@ -90,6 +133,11 @@ export function getMainDom(doc: Document): MainDom {
     toggleKeyBtn: byId<HTMLButtonElement>("toggle-key-visibility", doc),
     apiKeyHelpBtn: byId<HTMLButtonElement>("api-key-help-btn", doc),
     apiKeyHelpModal: byId<HTMLElement>("api-key-help-modal", doc),
+    apiKeyHelpTitle: byIdOptional<HTMLElement>("api-key-help-title", doc) ?? fallbackDiv(),
+    apiKeyHelpList:
+      byIdOptional<HTMLOListElement>("api-key-help-list", doc) ??
+      (createFallbackElement<HTMLOListElement>("ol") as HTMLOListElement),
+    apiKeyHelpHint: byIdOptional<HTMLElement>("api-key-help-hint", doc) ?? fallbackDiv(),
     closeApiKeyHelpBtn: byId<HTMLButtonElement>("close-api-key-help-btn", doc),
     connectionStatus: byId<HTMLElement>("connection-status", doc),
     testApiKeyBtn: byId<HTMLButtonElement>("test-api-key-btn", doc),
@@ -122,7 +170,20 @@ export function getMainDom(doc: Document): MainDom {
 
 export function populateUI(dom: MainDom, settings: Settings) {
   dom.sttProviderSelect.value = settings.sttProvider;
+  if (settings.sttProvider === "openai" && settings.providers.openai.authMode === "oauth_experimental") {
+    dom.sttProviderSelect.value = "openai_oauth";
+  }
   dom.apiKeyInput.value = settings.providers[settings.sttProvider].apiKey;
+  const oauthSession = settings.providers.openai.oauthSession;
+  dom.openaiOauthStatus.textContent = oauthSession
+    ? `Connected (${oauthSession.planType}, experimental)`
+    : "Not connected (experimental)";
+  dom.openaiOauthControls.hidden = dom.sttProviderSelect.value !== "openai_oauth";
+  dom.openaiOauthLoginBtn.hidden = !!oauthSession;
+  dom.openaiOauthLogoutBtn.hidden = !oauthSession;
+  dom.openaiOauthLogoutBtn.disabled = !oauthSession;
+  dom.openaiDeviceAuthRow.hidden = true;
+  dom.openaiDeviceUserCode.textContent = "";
   dom.hotkeyInput.value = settings.hotkey;
   dom.debugLoggingCheckbox.checked = settings.debugLoggingEnabled;
 

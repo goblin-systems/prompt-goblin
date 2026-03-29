@@ -87,6 +87,44 @@ body {
   flex: 0 0 auto;
 }
 
+.openai-oauth-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.openai-oauth-controls[hidden],
+#api-key-controls[hidden],
+#api-key-input-row[hidden],
+#openai-oauth-login-btn[hidden],
+#openai-oauth-logout-btn[hidden] {
+  display: none !important;
+}
+
+.openai-oauth-controls .status-row {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.openai-device-auth-row {
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.openai-device-user-code {
+  user-select: text;
+  cursor: text;
+  padding: 2px 6px;
+  border: 1px solid var(--border-default);
+}
+
+.openai-device-auth-row[hidden] {
+  display: none !important;
+}
+
 .inline-field {
   align-items: center;
   flex-wrap: wrap;

@@ -123,6 +123,40 @@ pub fn open_debug_log_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("Only http(s) URLs are allowed".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("start").arg("").arg(trimmed);
+        c
+    };
+
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = Command::new("open");
+        c.arg(trimmed);
+        c
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let mut c = Command::new("xdg-open");
+        c.arg(trimmed);
+        c
+    };
+
+    cmd.spawn()
+        .map_err(|e| format!("Failed to open URL: {}", e))?;
+
+    Ok(())
+}
+
 pub fn resolve_log_file_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()

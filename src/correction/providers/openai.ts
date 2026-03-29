@@ -1,7 +1,9 @@
+import type { ProviderAuth } from "../../settings";
 import type { CorrectionRuntime } from "../types";
 import { buildCorrectionPromptParts } from "../prompt";
 
 const OPENAI_API_BASE = "https://api.openai.com/v1";
+
 const OPENAI_CORRECTION_MODEL_PRIORITY = [
   "gpt-4.1-mini",
   "gpt-4o-mini",
@@ -15,11 +17,11 @@ function normalizeModelName(model: string): string {
   return model.trim();
 }
 
-function toAuthHeaders(apiKey: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-  };
+function requireApiKey(auth: ProviderAuth): string {
+  if (auth.type !== "api_key") {
+    throw new Error("OpenAI API correction requires API key authentication");
+  }
+  return auth.token;
 }
 
 function extractApiErrorMessage(payload: unknown): string {
@@ -28,7 +30,16 @@ function extractApiErrorMessage(payload: unknown): string {
   }
 
   const maybeError = (payload as { error?: { message?: string } }).error;
-  return maybeError?.message || "Unknown API error";
+  if (maybeError?.message) {
+    return maybeError.message;
+  }
+
+  const maybeDetail = (payload as { detail?: unknown }).detail;
+  if (typeof maybeDetail === "string") {
+    return maybeDetail;
+  }
+
+  return "Unknown API error";
 }
 
 function isSupportedOpenAICorrectionModel(model: string): boolean {
@@ -55,10 +66,6 @@ function compareOpenAICorrectionPriority(left: string, right: string): number {
 }
 
 async function fetchOpenAICorrectionModels(apiKey: string): Promise<string[]> {
-  if (!apiKey) {
-    throw new Error("API key not configured");
-  }
-
   const response = await fetch(`${OPENAI_API_BASE}/models`, {
     method: "GET",
     headers: {
@@ -145,7 +152,10 @@ async function correctOpenAIText(
 
   const response = await fetch(`${OPENAI_API_BASE}/responses`, {
     method: "POST",
-    headers: toAuthHeaders(apiKey),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({
       model: normalized,
       instructions: prompt.instructions,
@@ -166,21 +176,21 @@ async function correctOpenAIText(
 export const openAICorrectionProvider: CorrectionRuntime = {
   id: "openai",
   label: "OpenAI",
-  fetchModels(apiKey: string) {
-    return fetchOpenAICorrectionModels(apiKey);
+  fetchModels(auth: ProviderAuth) {
+    return fetchOpenAICorrectionModels(requireApiKey(auth));
   },
-  validateModel(apiKey: string, model: string) {
-    return validateOpenAICorrectionModel(apiKey, model);
+  validateModel(auth: ProviderAuth, model: string) {
+    return validateOpenAICorrectionModel(requireApiKey(auth), model);
   },
   correctText(
-    apiKey: string,
+    auth: ProviderAuth,
     model: string,
     transcript: string,
     sourceLanguage?: string,
     targetLanguage?: string
   ) {
     return correctOpenAIText(
-      apiKey,
+      requireApiKey(auth),
       model,
       transcript,
       sourceLanguage ?? "auto",

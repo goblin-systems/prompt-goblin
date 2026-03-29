@@ -10,6 +10,7 @@ import { DEFAULT_TEXT_COMMANDS, type TextCommand } from "./text-commands";
 export type SttProvider = "gemini" | "openai";
 export type LineBreakMode = "enter" | "shift_enter" | "ctrl_enter";
 export type ListeningDingSound = "chime" | "soft" | "digital";
+export type OpenAIAuthMode = "api_key" | "oauth_experimental";
 
 export interface ProviderModelCache {
   apiKeyFingerprint: string;
@@ -25,11 +26,32 @@ export interface GeminiProviderSettings {
 }
 
 export interface OpenAIProviderSettings {
+  authMode: OpenAIAuthMode;
   apiKey: string;
+  oauthSession: OpenAIOAuthSession | null;
   selectedModel: string;
   lastKnownGoodModel: string;
   modelCache: ProviderModelCache | null;
 }
+
+export interface OpenAIOAuthSession {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+  accountId: string;
+  planType: string;
+}
+
+export type ProviderAuth =
+  | { type: "api_key"; token: string }
+  | {
+      type: "oauth";
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: number;
+      accountId: string;
+      planType: string;
+    };
 
 export interface CorrectionProviderSettings {
   selectedModel: string;
@@ -82,7 +104,9 @@ const DEFAULTS: Settings = {
       modelCache: null,
     },
     openai: {
+      authMode: "api_key",
       apiKey: "",
+      oauthSession: null,
       selectedModel: "",
       lastKnownGoodModel: "",
       modelCache: null,
@@ -249,7 +273,28 @@ export async function loadSettings(): Promise<Settings> {
 
     if (providers.openai && typeof providers.openai === "object") {
       const openai = providers.openai as Partial<OpenAIProviderSettings>;
+      if (openai.authMode === "api_key" || openai.authMode === "oauth_experimental") {
+        settings.providers.openai.authMode = openai.authMode;
+      }
       if (typeof openai.apiKey === "string") settings.providers.openai.apiKey = openai.apiKey;
+      if (openai.oauthSession && typeof openai.oauthSession === "object") {
+        const session = openai.oauthSession as Partial<OpenAIOAuthSession>;
+        if (
+          typeof session.accessToken === "string" &&
+          typeof session.refreshToken === "string" &&
+          typeof session.expiresAt === "number" &&
+          typeof session.accountId === "string" &&
+          typeof session.planType === "string"
+        ) {
+          settings.providers.openai.oauthSession = {
+            accessToken: session.accessToken,
+            refreshToken: session.refreshToken,
+            expiresAt: session.expiresAt,
+            accountId: session.accountId,
+            planType: session.planType,
+          };
+        }
+      }
       if (typeof openai.selectedModel === "string") {
         settings.providers.openai.selectedModel = openai.selectedModel;
       }
@@ -483,10 +528,17 @@ export async function saveProviderModelCache(
 ): Promise<void> {
   const s = await getStore();
   const providers = (await s.get<Settings["providers"]>("providers")) ?? getDefaultSettings().providers;
-  providers[provider] = {
-    ...providers[provider],
-    modelCache: cache,
-  };
+  if (provider === "openai") {
+    providers.openai = {
+      ...providers.openai,
+      modelCache: cache,
+    };
+  } else {
+    providers.gemini = {
+      ...providers.gemini,
+      modelCache: cache,
+    };
+  }
   await s.set("providers", providers);
   if (provider === "gemini") {
     await s.set("modelCache", cache);
@@ -500,10 +552,17 @@ export async function saveProviderLastKnownGoodModel(
 ): Promise<void> {
   const s = await getStore();
   const providers = (await s.get<Settings["providers"]>("providers")) ?? getDefaultSettings().providers;
-  providers[provider] = {
-    ...providers[provider],
-    lastKnownGoodModel: model,
-  };
+  if (provider === "openai") {
+    providers.openai = {
+      ...providers.openai,
+      lastKnownGoodModel: model,
+    };
+  } else {
+    providers.gemini = {
+      ...providers.gemini,
+      lastKnownGoodModel: model,
+    };
+  }
   await s.set("providers", providers);
   if (provider === "gemini") {
     await s.set("lastKnownGoodLiveModel", model);
@@ -543,8 +602,51 @@ export async function saveCorrectionProviderLastKnownGoodModel(
   await s.save();
 }
 
+export function getProviderAuth(settings: Settings, provider = settings.sttProvider): ProviderAuth | null {
+  if (provider === "openai") {
+    const openai = settings.providers.openai;
+    if (openai.authMode === "oauth_experimental" && openai.oauthSession) {
+      return {
+        type: "oauth",
+        accessToken: openai.oauthSession.accessToken,
+        refreshToken: openai.oauthSession.refreshToken,
+        expiresAt: openai.oauthSession.expiresAt,
+        accountId: openai.oauthSession.accountId,
+        planType: openai.oauthSession.planType,
+      };
+    }
+  }
+
+  const token = settings.providers[provider].apiKey.trim();
+  if (!token) {
+    return null;
+  }
+
+  return {
+    type: "api_key",
+    token,
+  };
+}
+
+export function getProviderAuthIdentity(settings: Settings, provider = settings.sttProvider): string {
+  const auth = getProviderAuth(settings, provider);
+  if (!auth) {
+    return "";
+  }
+
+  if (auth.type === "oauth") {
+    return `oauth:${auth.accountId}:${auth.refreshToken}`;
+  }
+
+  return auth.token;
+}
+
 export function getProviderApiKey(settings: Settings, provider = settings.sttProvider): string {
-  return settings.providers[provider].apiKey;
+  const auth = getProviderAuth(settings, provider);
+  if (!auth) {
+    return "";
+  }
+  return auth.type === "oauth" ? auth.accessToken : auth.token;
 }
 
 export function getProviderSelectedModel(

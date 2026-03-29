@@ -15,6 +15,16 @@ describe("correction service", () => {
     expect(getCorrectionLabel("gemini")).toBe("Gemini");
   });
 
+  test("returns codex provider when authMode is oauth_experimental", () => {
+    expect(getCorrectionRuntime("openai", "oauth_experimental").label).toBe("Codex");
+    expect(getCorrectionLabel("openai", "oauth_experimental")).toBe("Codex");
+  });
+
+  test("returns openai provider when authMode is api_key", () => {
+    expect(getCorrectionRuntime("openai", "api_key").label).toBe("OpenAI");
+    expect(getCorrectionLabel("openai", "api_key")).toBe("OpenAI");
+  });
+
   test("correction is disabled by default", () => {
     const settings = getDefaultSettings();
     expect(isTranscriptionCorrectionEnabled(settings)).toBe(false);

@@ -38,8 +38,9 @@
           <div class="field">
             <div class="field-block">
               <select id="stt-provider-select">
-                <option value="gemini">Gemini</option>
-                <option value="openai">OpenAI</option>
+                <option value="gemini">Gemini API</option>
+                <option value="openai">OpenAI API</option>
+                <option value="openai_oauth">OpenAI Codex OAuth (experimental)</option>
               </select>
             </div>
           </div>
@@ -48,43 +49,68 @@
 
         <section class="settings-section">
           <div class="section-heading-row">
-            <h2>API KEY</h2>
+            <h2 id="credential-section-title">API KEY</h2>
             <button
               id="api-key-help-btn"
               class="icon-btn help-btn"
               type="button"
-              title="How to get an API key"
-              aria-label="How to get an API key"
+              title="Provider setup instructions"
+              aria-label="Provider setup instructions"
             >
               <i data-lucide="circle-help"></i>
             </button>
           </div>
-          <div class="field api-key-row">
-            <div class="field-block">
-              <input
-                type="password"
-                id="api-key-input"
-                placeholder="Paste your API key..."
-                spellcheck="false"
-                autocomplete="off"
-              />
+          <div id="openai-oauth-controls" class="openai-oauth-controls" hidden>
+            <div id="openai-device-auth-row" class="openai-device-auth-row" hidden>
+              <span class="hint">Code:</span>
+              <code id="openai-device-user-code" class="openai-device-user-code" title="Device code"></code>
+              <button
+                id="openai-device-copy-btn"
+                class="icon-btn"
+                type="button"
+                title="Copy code"
+                aria-label="Copy device code"
+              >
+                <i data-lucide="copy"></i>
+              </button>
             </div>
-            <button
-              id="toggle-key-visibility"
-              class="icon-btn"
-              type="button"
-              title="Toggle visibility"
-              aria-label="Toggle API key visibility"
-            >
-              <i data-lucide="eye"></i>
-            </button>
+            <div class="status-row">
+              <span id="openai-oauth-status" class="hint">Not connected (experimental)</span>
+              <button id="openai-oauth-login-btn" class="secondary-btn" type="button">Login</button>
+              <button id="openai-oauth-logout-btn" class="secondary-btn" type="button">Logout</button>
+            </div>
+            <p class="hint">
+              Experimental OAuth uses ChatGPT subscription access. API key mode remains the primary path.
+            </p>
           </div>
-          <div class="status-row">
-            <span id="connection-status" class="status-indicator disconnected">
-              <span class="status-dot"></span>
-              <span class="status-text">Not configured</span>
-            </span>
-            <button id="test-api-key-btn" class="secondary-btn" type="button">Test</button>
+          <div id="api-key-controls">
+            <div id="api-key-input-row" class="field api-key-row">
+              <div class="field-block">
+                <input
+                  type="password"
+                  id="api-key-input"
+                  placeholder="Paste your API key..."
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </div>
+              <button
+                id="toggle-key-visibility"
+                class="icon-btn"
+                type="button"
+                title="Toggle visibility"
+                aria-label="Toggle API key visibility"
+              >
+                <i data-lucide="eye"></i>
+              </button>
+            </div>
+            <div class="status-row">
+              <span id="connection-status" class="status-indicator disconnected">
+                <span class="status-dot"></span>
+                <span class="status-text">Not configured</span>
+              </span>
+              <button id="test-api-key-btn" class="secondary-btn" type="button">Test</button>
+            </div>
           </div>
         </section>
 
@@ -376,7 +402,7 @@
           aria-labelledby="api-key-help-title"
         >
           <div class="modal-header">
-            <h3 id="api-key-help-title">Get an API key</h3>
+            <h3 id="api-key-help-title">Provider setup</h3>
             <button
               id="close-api-key-help-btn"
               class="icon-btn modal-close-btn modal-btn-reject"
@@ -386,13 +412,12 @@
               <i data-lucide="x"></i>
             </button>
           </div>
-          <ol class="modal-list">
-            <li>For Gemini, go to Google AI Studio (aistudio.google.com/apikey).</li>
-            <li>For OpenAI, go to platform.openai.com/api-keys.</li>
+          <ol id="api-key-help-list" class="modal-list">
+            <li>For Gemini API, go to Google AI Studio (aistudio.google.com/apikey).</li>
             <li>Generate a key and paste it into the API key field.</li>
             <li>Click <strong>Test</strong> to confirm the key works.</li>
           </ol>
-          <p class="hint">Keep your API key private and never share it publicly.</p>
+          <p id="api-key-help-hint" class="hint">Keep your API key private and never share it publicly.</p>
         </div>
       </div>
     </main>

@@ -1,6 +1,8 @@
 import type { ConnectionStatus, MainDom } from "./dom";
 import { fingerprintApiKey } from "./utils";
 import {
+  getProviderAuth,
+  getProviderAuthIdentity,
   getProviderModelCache,
   saveProviderLastKnownGoodModel,
   type Settings,
@@ -31,7 +33,7 @@ export interface ApiKeyControllerOptions {
 }
 
 export class ApiKeyController {
-  private lastTestedApiKey = "";
+  private lastTestedAuthIdentity = "";
   private readonly saveLastKnownGoodModel;
 
   constructor(private readonly options: ApiKeyControllerOptions) {
@@ -39,18 +41,25 @@ export class ApiKeyController {
   }
 
   resetLastTestedApiKey() {
-    this.lastTestedApiKey = "";
+    this.lastTestedAuthIdentity = "";
   }
 
   async handleProviderChange() {
     const settings = this.options.getCurrentSettings();
     settings.sttProvider = this.options.getActiveProvider();
+    const selectedProviderValue = this.options.dom.sttProviderSelect?.value;
+    if (selectedProviderValue === "openai_oauth") {
+      settings.providers.openai.authMode = "oauth_experimental";
+    } else if (selectedProviderValue === "openai") {
+      settings.providers.openai.authMode = "api_key";
+    }
 
     const providerSettings = settings.providers[settings.sttProvider];
     this.options.dom.apiKeyInput.value = providerSettings.apiKey;
     this.options.updateApiKeyTextForProvider();
-    this.options.updateConnectionStatus(providerSettings.apiKey ? "untested" : "disconnected");
-    this.options.dom.testApiKeyBtn.disabled = !providerSettings.apiKey;
+    const auth = getProviderAuth(settings, settings.sttProvider);
+    this.options.updateConnectionStatus(auth ? "untested" : "disconnected");
+    this.options.dom.testApiKeyBtn.disabled = !auth;
 
     await this.options.refreshLiveModelList(false);
     await this.options.refreshCorrectionModelList(false);
@@ -59,7 +68,11 @@ export class ApiKeyController {
   }
 
   handleLiveModelChange() {
-    if (this.options.dom.apiKeyInput.value.trim() !== this.lastTestedApiKey) {
+    const authIdentity = getProviderAuthIdentity(
+      this.options.getCurrentSettings(),
+      this.options.getActiveProvider()
+    );
+    if (authIdentity !== this.lastTestedAuthIdentity) {
       this.options.updateConnectionStatus("untested");
     }
     this.options.scheduleAutosave(0);
@@ -74,8 +87,16 @@ export class ApiKeyController {
     const apiKey = this.options.dom.apiKeyInput.value.trim();
     this.options.dom.testApiKeyBtn.disabled = !apiKey;
 
+    const settings = this.options.getCurrentSettings();
+    if (provider === "openai" && settings.providers.openai.authMode === "oauth_experimental") {
+      this.options.dom.testApiKeyBtn.disabled = false;
+      this.options.updateConnectionStatus("untested");
+      this.options.scheduleAutosave();
+      return;
+    }
+
     if (!apiKey) {
-      this.lastTestedApiKey = "";
+      this.lastTestedAuthIdentity = "";
       this.options.updateConnectionStatus("disconnected");
       this.options.populateLiveModelOptions([], "");
       this.options.populateCorrectionModelOptions([], "");
@@ -86,7 +107,8 @@ export class ApiKeyController {
       return;
     }
 
-    if (apiKey !== this.lastTestedApiKey) {
+    const authIdentity = getProviderAuthIdentity(settings, provider);
+    if (authIdentity !== this.lastTestedAuthIdentity) {
       this.options.updateConnectionStatus("untested");
     }
 
@@ -98,8 +120,9 @@ export class ApiKeyController {
   async handleApiKeyTest() {
     const provider = this.options.getActiveProvider();
     const providerLabel = getProviderLabel(provider);
-    const apiKey = this.options.dom.apiKeyInput.value.trim();
-    if (!apiKey) {
+    const settings = this.options.getCurrentSettings();
+    const auth = getProviderAuth(settings, provider);
+    if (!auth) {
       this.options.updateConnectionStatus("disconnected");
       return;
     }
@@ -123,10 +146,10 @@ export class ApiKeyController {
       );
 
       const runtime = this.options.getActiveProviderRuntime();
-      await runtime.validateModel(apiKey, selectedModel);
-      await runtime.probeModelForTranscription(apiKey, selectedModel);
+      await runtime.validateModel(auth, selectedModel);
+      await runtime.probeModelForTranscription(auth, selectedModel);
 
-      this.lastTestedApiKey = apiKey;
+      this.lastTestedAuthIdentity = getProviderAuthIdentity(settings, provider);
       this.options.getCurrentSettings().providers[provider].lastKnownGoodModel = selectedModel;
       await this.saveLastKnownGoodModel(provider, selectedModel);
       this.options.updateConnectionStatus("connected");
@@ -136,20 +159,24 @@ export class ApiKeyController {
       this.options.updateConnectionStatus("error", message);
       this.options.debugLog(`API/model test failed: ${message}`, "ERROR");
     } finally {
-      this.options.dom.testApiKeyBtn.disabled = !this.options.dom.apiKeyInput.value.trim();
+      const settings = this.options.getCurrentSettings();
+      const provider = this.options.getActiveProvider();
+      const auth = getProviderAuth(settings, provider);
+      this.options.dom.testApiKeyBtn.disabled = !auth;
     }
   }
 
   syncConnectionStatusFromSettings() {
     const settings = this.options.getCurrentSettings();
-    const providerApiKey = settings.providers[settings.sttProvider].apiKey;
-    this.options.updateConnectionStatus(providerApiKey ? "untested" : "disconnected");
-    this.options.dom.testApiKeyBtn.disabled = !providerApiKey;
+    const auth = getProviderAuth(settings, settings.sttProvider);
+    this.options.updateConnectionStatus(auth ? "untested" : "disconnected");
+    this.options.dom.testApiKeyBtn.disabled = !auth;
   }
 
   private updateModelHintsForApiKey(provider: SttProvider, apiKey: string) {
     const settings = this.options.getCurrentSettings();
-    const fingerprint = fingerprintApiKey(apiKey);
+    const identity = getProviderAuthIdentity(settings, provider) || apiKey;
+    const fingerprint = fingerprintApiKey(identity);
     const liveCache = getProviderModelCache(settings, provider);
     const liveCacheMatches =
       liveCache &&

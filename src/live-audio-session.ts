@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Settings, SttProvider } from "./settings";
+import type { ProviderAuth, Settings, SttProvider } from "./settings";
 import { createLiveTranscriber } from "./stt/service";
 import type { StatusCallback } from "./stt/types";
 import { applyTextCommands, getCommandTailGuardChars } from "./text-commands";
@@ -13,7 +13,7 @@ export interface LiveAudioSessionTranscriptUpdate {
 
 export interface LiveAudioSessionOptions<TStopResult = unknown> {
   provider: SttProvider;
-  apiKey: string;
+  auth: ProviderAuth;
   language: string;
   preferredModel: string;
   fallbackModels: string[];
@@ -69,7 +69,7 @@ export class LiveAudioSession<TStopResult = unknown> {
 
     this.transcriber.resetTranscript();
     this.transcriber.configure({
-      apiKey: this.options.apiKey,
+      auth: this.options.auth,
       language: this.options.language,
       preferredModel: this.options.preferredModel,
       fallbackModels: this.options.fallbackModels,

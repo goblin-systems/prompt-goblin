@@ -1,5 +1,6 @@
 mod audio;
 mod debug_log;
+mod http_proxy;
 mod keyboard;
 
 use tauri::{
@@ -23,6 +24,8 @@ pub fn run() {
             debug_log::set_debug_logging_enabled,
             debug_log::write_debug_log,
             debug_log::open_debug_log_folder,
+            debug_log::open_external_url,
+            http_proxy::http_fetch,
             keyboard::type_text,
             keyboard::type_text_incremental,
         ])

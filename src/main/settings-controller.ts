@@ -15,6 +15,7 @@ export const AUTOSAVE_DEBOUNCE_MS = 450;
 
 export interface SettingsFormSnapshot {
   apiKey: string;
+  providerOption: "gemini" | "openai" | "openai_oauth";
   hotkey: string;
   liveModel: string;
   correctionModel: string;
@@ -132,6 +133,11 @@ export function buildSettingsFromForm(
   };
 
   nextSettings.providers[activeProvider].apiKey = form.apiKey.trim();
+  if (form.providerOption === "openai_oauth") {
+    nextSettings.providers.openai.authMode = "oauth_experimental";
+  } else if (form.providerOption === "openai") {
+    nextSettings.providers.openai.authMode = "api_key";
+  }
   nextSettings.providers[activeProvider].selectedModel =
     form.liveModel || currentSettings.providers[activeProvider].selectedModel;
   nextSettings.transcriptionCorrection.providers[activeProvider].selectedModel =

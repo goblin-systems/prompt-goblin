@@ -8,7 +8,7 @@ import type { MainDom } from "./dom";
 import { LiveAudioSession } from "../live-audio-session";
 import type { Settings, SttProvider } from "../settings";
 import { base64ToBytes } from "./utils";
-import { getProviderLabel } from "../stt/service";
+import { getProviderAuth, getProviderLabel } from "../stt/service";
 
 export interface InputDeviceInfo {
   id: string;
@@ -283,9 +283,9 @@ export class MicTestController {
   private async start(mode: MicTestMode) {
     const provider = this.options.getActiveProvider();
     const settings = this.options.getCurrentSettings();
-    const apiKey = settings.providers[provider].apiKey.trim();
-    if (!apiKey) {
-      this.options.dom.micTestStatus.textContent = `${getProviderLabel(provider)} API key required`;
+    const auth = getProviderAuth(settings, provider);
+    if (!auth) {
+      this.options.dom.micTestStatus.textContent = `${getProviderLabel(provider)} credentials required`;
       this.options.dom.micTestTranscript.textContent = "Transcript: -";
       this.setSignalState(false, false);
       return;
@@ -300,7 +300,7 @@ export class MicTestController {
 
     const session = new LiveAudioSession<string | null>({
       provider,
-      apiKey,
+      auth,
       language: this.options.dom.languageSelect.value || "auto",
       preferredModel:
         this.options.dom.liveModelSelect.value || settings.providers[provider].selectedModel,

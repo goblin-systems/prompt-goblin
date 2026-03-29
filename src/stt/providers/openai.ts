@@ -1,4 +1,5 @@
 import { debugLog, isDebugLoggingEnabled } from "../../logger";
+import type { ProviderAuth } from "../../settings";
 import type {
   LivePipelineOptions,
   LiveTranscriber,
@@ -60,9 +61,28 @@ function normalizeModelName(model: string): string {
   return model.trim();
 }
 
-function toAuthHeaders(apiKey: string): HeadersInit {
+function resolveOpenAIAuthToken(auth: ProviderAuth): string {
+  if (auth.type === "api_key") {
+    return auth.token;
+  }
+
+  if (auth.expiresAt <= Date.now()) {
+    throw new Error("OpenAI Codex OAuth session expired. Reconnect from settings (experimental). ");
+  }
+
+  return auth.accessToken;
+}
+
+function toAuthHeaders(auth: ProviderAuth): HeadersInit {
+  if (auth.type === "oauth") {
+    return {
+      Authorization: `Bearer ${resolveOpenAIAuthToken(auth)}`,
+      "ChatGPT-Account-Id": auth.accountId,
+    };
+  }
+
   return {
-    Authorization: `Bearer ${apiKey}`,
+    Authorization: `Bearer ${resolveOpenAIAuthToken(auth)}`,
   };
 }
 
@@ -140,7 +160,7 @@ function buildModelCandidates(preferredModel: string, fallbackModels: string[]):
 }
 
 async function postTranscription(
-  apiKey: string,
+  auth: ProviderAuth,
   wavBytes: Uint8Array,
   model: string,
   language: string
@@ -164,7 +184,7 @@ async function postTranscription(
   try {
     response = await fetch(`${OPENAI_API_BASE}/audio/transcriptions`, {
       method: "POST",
-      headers: toAuthHeaders(apiKey),
+      headers: toAuthHeaders(auth),
       body: form,
       signal: timeout.signal,
     });
@@ -315,14 +335,14 @@ function buildRealtimeTranscriptionSessionRequest(model: string, language: strin
 }
 
 async function createRealtimeTranscriptionSession(
-  apiKey: string,
+  auth: ProviderAuth,
   model: string,
   language: string
 ): Promise<string> {
   const response = await fetch(OPENAI_REALTIME_TRANSCRIPTION_SESSIONS_URL, {
     method: "POST",
     headers: {
-      ...toAuthHeaders(apiKey),
+      ...toAuthHeaders(auth),
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildRealtimeTranscriptionSessionRequest(model, language)),
@@ -347,7 +367,7 @@ async function createRealtimeTranscriptionSession(
 }
 
 class OpenAILiveTranscriber implements LiveTranscriber {
-  private apiKey = "";
+  private auth: ProviderAuth | null = null;
   private language = "auto";
   private preferredModel = "";
   private fallbackModels: string[] = [];
@@ -375,13 +395,14 @@ class OpenAILiveTranscriber implements LiveTranscriber {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
 
   configure(config: LiveTranscriberConfig): void {
-    this.apiKey = config.apiKey;
+    const maybeLegacyApiKey = (config as unknown as { apiKey?: string }).apiKey;
+    this.auth = config.auth ?? (maybeLegacyApiKey ? { type: "api_key", token: maybeLegacyApiKey } : null);
     this.language = config.language ?? "auto";
     this.preferredModel = normalizeModelName(config.preferredModel ?? "");
     this.fallbackModels = buildModelCandidates("", config.fallbackModels ?? []);
     this.activeModel = buildModelCandidates(this.preferredModel, this.fallbackModels)[0] ?? "";
     debugLog(
-      `OpenAI configured (language='${this.language}', preferredModel='${this.preferredModel}', fallbackModels=${this.fallbackModels.length}, activeModel='${this.activeModel}', apiKeyPresent=${Boolean(this.apiKey)})`,
+      `OpenAI configured (language='${this.language}', preferredModel='${this.preferredModel}', fallbackModels=${this.fallbackModels.length}, activeModel='${this.activeModel}', authPresent=${Boolean(this.auth)})`,
       "INFO"
     );
   }
@@ -392,8 +413,8 @@ class OpenAILiveTranscriber implements LiveTranscriber {
   }
 
   async connect(options: { preserveTranscript?: boolean } = {}): Promise<void> {
-    if (!this.apiKey) {
-      this.onStatus?.("error", "API key not configured");
+    if (!this.auth) {
+      this.onStatus?.("error", "Provider auth not configured");
       return;
     }
 
@@ -579,7 +600,12 @@ class OpenAILiveTranscriber implements LiveTranscriber {
     this.closeExpected = false;
     this.connected = false;
 
-    const clientSecret = await createRealtimeTranscriptionSession(this.apiKey, model, this.language);
+    const auth = this.auth;
+    if (!auth) {
+      throw new Error("Provider auth not configured");
+    }
+
+    const clientSecret = await createRealtimeTranscriptionSession(auth, model, this.language);
 
     const socket = createRealtimeSocket(clientSecret);
     this.socket = socket;
@@ -849,9 +875,9 @@ class OpenAILiveTranscriber implements LiveTranscriber {
   }
 }
 
-async function fetchOpenAIModels(apiKey: string): Promise<string[]> {
-  if (!apiKey) {
-    throw new Error("API key not configured");
+async function fetchOpenAIModels(auth: ProviderAuth): Promise<string[]> {
+  if (auth.type === "oauth") {
+    return OPENAI_MODEL_PRIORITY.filter((model) => model !== "whisper-1");
   }
 
   const timeout = withTimeout(OPENAI_MODEL_FETCH_TIMEOUT_MS);
@@ -859,7 +885,7 @@ async function fetchOpenAIModels(apiKey: string): Promise<string[]> {
   try {
     response = await fetch(`${OPENAI_API_BASE}/models`, {
       method: "GET",
-      headers: toAuthHeaders(apiKey),
+      headers: toAuthHeaders(auth),
       signal: timeout.signal,
     });
   } catch (err) {
@@ -890,8 +916,8 @@ async function fetchOpenAIModels(apiKey: string): Promise<string[]> {
   return Array.from(discovered).sort(compareOpenAIModelPriority);
 }
 
-async function validateOpenAIModel(apiKey: string, model: string): Promise<void> {
-  const models = await fetchOpenAIModels(apiKey);
+async function validateOpenAIModel(auth: ProviderAuth, model: string): Promise<void> {
+  const models = await fetchOpenAIModels(auth);
   const normalized = normalizeModelName(model);
   if (!normalized) {
     throw new Error("No transcription model selected");
@@ -902,21 +928,17 @@ async function validateOpenAIModel(apiKey: string, model: string): Promise<void>
   }
 }
 
-async function probeOpenAIModel(apiKey: string, model: string): Promise<void> {
+async function probeOpenAIModel(auth: ProviderAuth, model: string): Promise<void> {
   const silenceWav = createSilentWavBase64();
-  await postTranscription(apiKey, base64ToBytes(silenceWav), model, "auto");
+  await postTranscription(auth, base64ToBytes(silenceWav), model, "auto");
 }
 
 async function transcribeOpenAIWavBase64(
-  apiKey: string,
+  auth: ProviderAuth,
   wavBase64: string,
   language = "auto",
   model = ""
 ): Promise<string> {
-  if (!apiKey) {
-    throw new Error("API key not configured");
-  }
-
   if (!wavBase64.trim()) {
     return "";
   }
@@ -930,7 +952,7 @@ async function transcribeOpenAIWavBase64(
   let lastError: unknown = null;
   for (const candidate of candidates) {
     try {
-      return (await postTranscription(apiKey, wavBytes, candidate, language)).trim();
+      return (await postTranscription(auth, wavBytes, candidate, language)).trim();
     } catch (err) {
       lastError = err;
     }
@@ -946,8 +968,11 @@ async function transcribeOpenAIWithLivePipeline(options: LivePipelineOptions): P
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  const maybeLegacyApiKey = (options as unknown as { apiKey?: string }).apiKey;
+  const auth = options.auth ?? (maybeLegacyApiKey ? { type: "api_key", token: maybeLegacyApiKey } : null);
+
   transcriber.configure({
-    apiKey: options.apiKey,
+    auth: auth as ProviderAuth,
     language: options.language,
     preferredModel: options.preferredModel,
     fallbackModels: options.fallbackModels,
@@ -992,20 +1017,20 @@ export const openaiProvider: SttProviderRuntime = {
   createLiveTranscriber() {
     return new OpenAILiveTranscriber();
   },
-  fetchModels(apiKey: string) {
-    return fetchOpenAIModels(apiKey);
+  fetchModels(auth: ProviderAuth) {
+    return fetchOpenAIModels(auth);
   },
-  validateApiKey(apiKey: string) {
-    return fetchOpenAIModels(apiKey).then(() => undefined);
+  validateApiKey(auth: ProviderAuth) {
+    return fetchOpenAIModels(auth).then(() => undefined);
   },
-  validateModel(apiKey: string, model: string) {
-    return validateOpenAIModel(apiKey, model);
+  validateModel(auth: ProviderAuth, model: string) {
+    return validateOpenAIModel(auth, model);
   },
-  probeModelForTranscription(apiKey: string, model: string) {
-    return probeOpenAIModel(apiKey, model);
+  probeModelForTranscription(auth: ProviderAuth, model: string) {
+    return probeOpenAIModel(auth, model);
   },
-  transcribeWavBase64(apiKey: string, wavBase64: string, language?: string, model?: string) {
-    return transcribeOpenAIWavBase64(apiKey, wavBase64, language ?? "auto", model ?? "");
+  transcribeWavBase64(auth: ProviderAuth, wavBase64: string, language?: string, model?: string) {
+    return transcribeOpenAIWavBase64(auth, wavBase64, language ?? "auto", model ?? "");
   },
   transcribeWithLivePipeline(options: LivePipelineOptions) {
     return transcribeOpenAIWithLivePipeline(options);

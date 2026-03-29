@@ -11,6 +11,10 @@ export function fingerprintApiKey(apiKey: string): string {
   return String(hash >>> 0);
 }
 
+export function fingerprintCredential(identity: string): string {
+  return fingerprintApiKey(identity);
+}
+
 export function base64ToBytes(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);

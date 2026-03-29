@@ -19,6 +19,9 @@ export interface EventBindingOptions {
   refreshLiveModelList: (forceApiRefresh: boolean) => Promise<void>;
   refreshCorrectionModelList: (forceApiRefresh: boolean) => Promise<void>;
   refreshMicrophoneList: (preferredDeviceId: string) => Promise<void>;
+  handleOpenAIOAuthLogin: AsyncVoid;
+  handleOpenAIOAuthLogout: () => void;
+  handleOpenAIDeviceCodeCopy?: () => Promise<void>;
   handleResetDefaults: AsyncVoid;
   handleOpenDebugFolder: AsyncVoid;
   cycleWaveformStyle: () => void;
@@ -42,6 +45,9 @@ export function setupMainEventBindings(options: EventBindingOptions) {
     refreshLiveModelList,
     refreshCorrectionModelList,
     refreshMicrophoneList,
+    handleOpenAIOAuthLogin,
+    handleOpenAIOAuthLogout,
+    handleOpenAIDeviceCodeCopy,
     handleResetDefaults,
     handleOpenDebugFolder,
     cycleWaveformStyle,
@@ -106,6 +112,18 @@ export function setupMainEventBindings(options: EventBindingOptions) {
 
   dom.apiKeyInput.addEventListener("input", () => {
     apiKeyController.handleApiKeyInput();
+  });
+
+  dom.openaiOauthLoginBtn?.addEventListener("click", async () => {
+    await handleOpenAIOAuthLogin();
+  });
+
+  dom.openaiOauthLogoutBtn?.addEventListener("click", () => {
+    handleOpenAIOAuthLogout();
+  });
+
+  dom.openaiDeviceCopyBtn?.addEventListener("click", async () => {
+    await handleOpenAIDeviceCodeCopy?.();
   });
 
   dom.hotkeyInput.addEventListener("input", () => settingsController.scheduleAutosave());

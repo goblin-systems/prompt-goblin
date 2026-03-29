@@ -1,5 +1,6 @@
 import type { CorrectionRuntime } from "../types";
 import { buildCorrectionUserPrompt } from "../prompt";
+import type { ProviderAuth } from "../../settings";
 
 type ModelListResponse = {
   models?: Array<{
@@ -111,6 +112,13 @@ async function fetchGeminiCorrectionModels(apiKey: string): Promise<string[]> {
   return Array.from(models).sort(compareGeminiCorrectionPriority);
 }
 
+function requireGeminiApiKey(auth: ProviderAuth): string {
+  if (auth.type !== "api_key") {
+    throw new Error("Gemini correction requires API key authentication");
+  }
+  return auth.token;
+}
+
 async function validateGeminiCorrectionModel(apiKey: string, model: string): Promise<void> {
   const normalized = normalizeModelName(model);
   if (!normalized) {
@@ -199,19 +207,20 @@ async function correctGeminiText(
 export const geminiCorrectionProvider: CorrectionRuntime = {
   id: "gemini",
   label: "Gemini",
-  fetchModels(apiKey: string) {
-    return fetchGeminiCorrectionModels(apiKey);
+  fetchModels(auth: ProviderAuth) {
+    return fetchGeminiCorrectionModels(requireGeminiApiKey(auth));
   },
-  validateModel(apiKey: string, model: string) {
-    return validateGeminiCorrectionModel(apiKey, model);
+  validateModel(auth: ProviderAuth, model: string) {
+    return validateGeminiCorrectionModel(requireGeminiApiKey(auth), model);
   },
   correctText(
-    apiKey: string,
+    auth: ProviderAuth,
     model: string,
     transcript: string,
     sourceLanguage?: string,
     targetLanguage?: string
   ) {
+    const apiKey = requireGeminiApiKey(auth);
     return correctGeminiText(
       apiKey,
       model,

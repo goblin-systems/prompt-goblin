@@ -52,6 +52,12 @@ import {
   setupWindowAndModalControls,
 } from "./main/window-controls";
 import {
+  pollOpenAIDeviceAuth,
+  refreshOpenAIOAuthSession,
+  startOpenAIDeviceAuth,
+} from "./openai/oauth";
+import {
+  getProviderAuthIdentity,
   getProviderModelCache,
   loadSettings,
   saveCorrectionProviderModelCache,
@@ -61,7 +67,7 @@ import {
   type Settings,
   type SttProvider,
 } from "./settings";
-import { getProviderLabel, getProviderRuntime } from "./stt/service";
+import { getProviderAuth, getProviderLabel, getProviderRuntime } from "./stt/service";
 
 let currentSettings: Settings;
 let dom: MainDom;
@@ -70,8 +76,21 @@ let micTestController: MicTestController;
 let apiKeyController: ApiKeyController;
 let dingPreviewAudioContext: AudioContext | null = null;
 
+type ProviderOption = "gemini" | "openai" | "openai_oauth";
+
+function getSelectedProviderOption(): ProviderOption {
+  const value = dom.sttProviderSelect.value;
+  if (value === "openai_oauth") {
+    return "openai_oauth";
+  }
+  if (value === "openai") {
+    return "openai";
+  }
+  return "gemini";
+}
+
 function getActiveProvider(): SttProvider {
-  return dom.sttProviderSelect.value === "openai" ? "openai" : "gemini";
+  return getSelectedProviderOption() === "gemini" ? "gemini" : "openai";
 }
 
 function getActiveProviderRuntime() {
@@ -79,11 +98,58 @@ function getActiveProviderRuntime() {
 }
 
 function getActiveCorrectionRuntime() {
-  return getCorrectionRuntime(getActiveProvider());
+  return getCorrectionRuntime(getActiveProvider(), currentSettings.providers.openai.authMode);
 }
 
 function getActiveCorrectionLabel(): string {
-  return getCorrectionLabel(getActiveProvider());
+  return getCorrectionLabel(getActiveProvider(), currentSettings.providers.openai.authMode);
+}
+
+async function openExternalUrl(url: string) {
+  await invoke("open_external_url", { url });
+}
+
+function setProviderHelpContent(providerOption: ProviderOption) {
+  const setList = (items: string[]) => {
+    dom.apiKeyHelpList.replaceChildren(
+      ...items.map((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        return li;
+      })
+    );
+  };
+
+  if (providerOption === "gemini") {
+    dom.apiKeyHelpTitle.textContent = "Gemini API setup";
+    setList([
+      "Go to Google AI Studio (aistudio.google.com/apikey).",
+      "Create an API key and paste it into the API key field.",
+      "Click Test to confirm the key works.",
+    ]);
+    dom.apiKeyHelpHint.textContent = "Keep your API key private and never share it publicly.";
+    return;
+  }
+
+  if (providerOption === "openai") {
+    dom.apiKeyHelpTitle.textContent = "OpenAI API setup";
+    setList([
+      "Go to OpenAI platform API keys (platform.openai.com/api-keys).",
+      "Create an API key and paste it into the API key field.",
+      "Click Test to confirm the key works.",
+    ]);
+    dom.apiKeyHelpHint.textContent = "Keep your API key private and never share it publicly.";
+    return;
+  }
+
+  dom.apiKeyHelpTitle.textContent = "OpenAI Codex OAuth setup (experimental)";
+  setList([
+    "Open ChatGPT security settings and enable device code authorization for Codex.",
+    "In Prompt Goblin, click Login and complete the device flow in your browser.",
+    "Use the shown device code (copy button available) and open the device page link.",
+  ]);
+  dom.apiKeyHelpHint.textContent =
+    "OAuth uses your ChatGPT subscription access and does not require an API key.";
 }
 
 function setCurrentSettings(settings: Settings) {
@@ -93,13 +159,65 @@ function setCurrentSettings(settings: Settings) {
 
 function updateApiKeyTextForProvider() {
   const provider = getActiveProvider();
-  const keySectionTitle = document.querySelector(
-    ".settings-section .section-heading-row h2"
-  ) as HTMLElement | null;
-  if (keySectionTitle) {
-    keySectionTitle.textContent = `${getProviderLabel(provider).toUpperCase()} API KEY`;
+  const selectedOption = getSelectedProviderOption();
+  const keySectionTitle = dom.credentialSectionTitle;
+  const useOAuth = selectedOption === "openai_oauth";
+
+  if (selectedOption === "gemini") {
+    keySectionTitle.textContent = "GEMINI API KEY";
+    dom.apiKeyHelpBtn.title = "How to set up Gemini API";
+    dom.apiKeyHelpBtn.setAttribute("aria-label", "How to set up Gemini API");
+  } else if (selectedOption === "openai") {
+    keySectionTitle.textContent = "OPENAI API KEY";
+    dom.apiKeyHelpBtn.title = "How to set up OpenAI API";
+    dom.apiKeyHelpBtn.setAttribute("aria-label", "How to set up OpenAI API");
+  } else {
+    keySectionTitle.textContent = "OPENAI OAUTH";
+    dom.apiKeyHelpBtn.title = "How to set up OpenAI Codex OAuth";
+    dom.apiKeyHelpBtn.setAttribute("aria-label", "How to set up OpenAI Codex OAuth");
   }
+  setProviderHelpContent(selectedOption);
+
   dom.apiKeyInput.placeholder = `Paste your ${getProviderLabel(provider)} API key...`;
+
+  const isOpenAI = selectedOption === "openai" || selectedOption === "openai_oauth";
+  dom.openaiOauthControls.hidden = selectedOption !== "openai_oauth";
+  dom.apiKeyInputRow.hidden = useOAuth;
+  if (selectedOption !== "openai_oauth") {
+    dom.openaiDeviceAuthRow.hidden = true;
+    dom.openaiDeviceUserCode.textContent = "";
+  }
+
+  if (isOpenAI) {
+    dom.apiKeyInput.disabled = useOAuth;
+    dom.toggleKeyBtn.disabled = useOAuth;
+
+    const oauthSession = currentSettings.providers.openai.oauthSession;
+    if (oauthSession) {
+      const expired = oauthSession.expiresAt <= Date.now();
+      dom.openaiOauthStatus.textContent = expired
+        ? `Expired session (${oauthSession.planType}, experimental)`
+        : `Connected (${oauthSession.planType}, experimental)`;
+      dom.openaiOauthLoginBtn.hidden = !expired;
+      dom.openaiOauthLogoutBtn.hidden = false;
+      dom.openaiOauthLogoutBtn.disabled = false;
+      dom.testApiKeyBtn.disabled = useOAuth && expired;
+    } else {
+      dom.openaiOauthStatus.textContent = "Not connected (experimental)";
+      dom.openaiOauthLoginBtn.hidden = false;
+      dom.openaiOauthLogoutBtn.hidden = true;
+      dom.openaiOauthLogoutBtn.disabled = true;
+      dom.testApiKeyBtn.disabled = useOAuth;
+    }
+
+    if (!useOAuth) {
+      dom.testApiKeyBtn.disabled = !currentSettings.providers.openai.apiKey.trim();
+    }
+  } else {
+    dom.apiKeyInput.disabled = false;
+    dom.toggleKeyBtn.disabled = false;
+    dom.testApiKeyBtn.disabled = !currentSettings.providers.gemini.apiKey;
+  }
 }
 
 function updateConnectionStatus(status: ConnectionStatus, message?: string) {
@@ -145,6 +263,7 @@ function updateTypingModeHint() {
 function readFormSnapshot(): SettingsFormSnapshot {
   return {
     apiKey: dom.apiKeyInput.value,
+    providerOption: getSelectedProviderOption(),
     hotkey: dom.hotkeyInput.value,
     liveModel: dom.liveModelSelect.value,
     correctionModel: dom.correctionModelSelect.value,
@@ -162,6 +281,79 @@ function readFormSnapshot(): SettingsFormSnapshot {
     listeningDingSound: dom.listeningDingSoundSelect.value as Settings["listeningDingSound"],
     listeningDingVolumePercent: dom.listeningDingVolumeInput.value,
   };
+}
+
+async function handleOpenAIOAuthLogin() {
+  if (getActiveProvider() !== "openai") {
+    return;
+  }
+
+  dom.openaiOauthLoginBtn.disabled = true;
+  dom.openaiOauthStatus.textContent = "Starting device auth...";
+  dom.openaiDeviceAuthRow.hidden = true;
+  dom.openaiDeviceUserCode.textContent = "";
+
+  try {
+    const start = await startOpenAIDeviceAuth();
+    dom.openaiOauthStatus.textContent = "Opened browser. Complete authentication there, then return here.";
+    dom.openaiDeviceAuthRow.hidden = false;
+    dom.openaiDeviceUserCode.textContent = start.userCode;
+    try {
+      await openExternalUrl(start.verificationUrl);
+    } catch {
+      // ignore open failures; user still has the device code
+    }
+
+    const session = await pollOpenAIDeviceAuth(
+      start.deviceAuthId,
+      start.userCode,
+      start.intervalSeconds
+    );
+
+    currentSettings.providers.openai.authMode = "oauth_experimental";
+    currentSettings.providers.openai.oauthSession = session;
+    dom.sttProviderSelect.value = "openai_oauth";
+    dom.openaiDeviceAuthRow.hidden = true;
+    dom.openaiDeviceUserCode.textContent = "";
+    updateApiKeyTextForProvider();
+    settingsController.scheduleAutosave(0);
+    await refreshLiveModelList(true);
+    await refreshCorrectionModelList(true);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "OpenAI Codex OAuth login failed";
+    dom.openaiOauthStatus.textContent = `OAuth failed: ${message}`;
+    debugLog(`OpenAI Codex OAuth login failed: ${message}`, "ERROR");
+  } finally {
+    dom.openaiOauthLoginBtn.disabled = false;
+  }
+}
+
+function handleOpenAIOAuthLogout() {
+  currentSettings.providers.openai.oauthSession = null;
+  if (currentSettings.providers.openai.authMode === "oauth_experimental") {
+    currentSettings.providers.openai.authMode = "api_key";
+    dom.sttProviderSelect.value = "openai";
+  }
+  dom.openaiOauthStatus.textContent = "Not connected (experimental)";
+  dom.openaiDeviceAuthRow.hidden = true;
+  dom.openaiDeviceUserCode.textContent = "";
+  dom.openaiOauthLogoutBtn.disabled = true;
+  updateApiKeyTextForProvider();
+  settingsController.scheduleAutosave(0);
+}
+
+async function handleOpenAIDeviceCodeCopy() {
+  const code = dom.openaiDeviceUserCode.textContent?.trim() ?? "";
+  if (!code) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(code);
+    showSaveStatus("Device code copied", false, 1200);
+  } catch {
+    showSaveStatus("Copy failed", true, 1200);
+  }
 }
 
 function updateRecordingLoudnessValue() {
@@ -337,14 +529,41 @@ function showSaveStatus(message: string, isError = false, durationMs?: number) {
   showToast(message, isError ? "error" : "success", durationMs ?? (isError ? 3000 : 1500));
 }
 
+async function ensureOpenAIOAuthSessionFresh(): Promise<void> {
+  const openai = currentSettings.providers.openai;
+  if (openai.authMode !== "oauth_experimental" || !openai.oauthSession) {
+    return;
+  }
+
+  if (openai.oauthSession.expiresAt > Date.now() + 60_000) {
+    return;
+  }
+
+  try {
+    openai.oauthSession = await refreshOpenAIOAuthSession(openai.oauthSession);
+    settingsController.scheduleAutosave(0);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "OAuth refresh failed";
+    debugLog(`OpenAI Codex OAuth refresh failed: ${message}`, "WARN");
+  }
+}
+
 async function refreshLiveModelList(forceApiRefresh: boolean) {
+  await ensureOpenAIOAuthSessionFresh();
   const provider = getActiveProvider();
+  const providerOption = getSelectedProviderOption();
+  const auth = getProviderAuth(currentSettings, provider);
+  const messages =
+    providerOption === "openai_oauth"
+      ? { ...liveModelMessages, emptyApiKey: "Login with OpenAI Codex OAuth to fetch models." }
+      : liveModelMessages;
   await refreshModelList({
     provider,
     providerLabel: getProviderLabel(provider),
-    apiKey: dom.apiKeyInput.value.trim(),
+    auth,
+    authIdentity: getProviderAuthIdentity(currentSettings, provider),
     forceApiRefresh,
-    fetchModels: (apiKey) => getActiveProviderRuntime().fetchModels(apiKey),
+    fetchModels: (providerAuth) => getActiveProviderRuntime().fetchModels(providerAuth),
     getCache: () => getProviderModelCache(currentSettings, provider),
     getSelectedModel: () => currentSettings.providers[provider].selectedModel,
     getLastKnownGoodModel: () => currentSettings.providers[provider].lastKnownGoodModel,
@@ -362,18 +581,29 @@ async function refreshLiveModelList(forceApiRefresh: boolean) {
       dom.refreshModelsBtn.disabled = disabled;
     },
     log: debugLog,
-    messages: liveModelMessages,
+    messages,
   });
 }
 
 async function refreshCorrectionModelList(forceApiRefresh: boolean) {
+  await ensureOpenAIOAuthSessionFresh();
   const provider = getActiveProvider();
+  const providerOption = getSelectedProviderOption();
+  const auth = getProviderAuth(currentSettings, provider);
+  const messages =
+    providerOption === "openai_oauth"
+      ? {
+          ...correctionModelMessages,
+          emptyApiKey: "Login with OpenAI Codex OAuth to fetch correction models.",
+        }
+      : correctionModelMessages;
   await refreshModelList({
     provider,
     providerLabel: getActiveCorrectionLabel(),
-    apiKey: dom.apiKeyInput.value.trim(),
+    auth,
+    authIdentity: getProviderAuthIdentity(currentSettings, provider),
     forceApiRefresh,
-    fetchModels: (apiKey) => getActiveCorrectionRuntime().fetchModels(apiKey),
+    fetchModels: (providerAuth) => getActiveCorrectionRuntime().fetchModels(providerAuth),
     getCache: () => currentSettings.transcriptionCorrection.providers[provider].modelCache,
     getSelectedModel: () => currentSettings.transcriptionCorrection.providers[provider].selectedModel,
     getLastKnownGoodModel: () =>
@@ -393,7 +623,7 @@ async function refreshCorrectionModelList(forceApiRefresh: boolean) {
     },
     onAfterUpdate: updateTranscriptCorrectionUI,
     log: debugLog,
-    messages: correctionModelMessages,
+    messages,
   });
 }
 
@@ -530,6 +760,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     refreshLiveModelList,
     refreshCorrectionModelList,
     refreshMicrophoneList,
+    handleOpenAIOAuthLogin,
+    handleOpenAIOAuthLogout,
+    handleOpenAIDeviceCodeCopy,
     handleResetDefaults: async () => settingsController.resetToDefaults(),
     handleOpenDebugFolder: openDebugFolder,
     cycleWaveformStyle: cycleCurrentWaveformStyle,

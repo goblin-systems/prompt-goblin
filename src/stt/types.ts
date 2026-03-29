@@ -1,4 +1,4 @@
-import type { SttProvider } from "../settings";
+import type { ProviderAuth, SttProvider } from "../settings";
 
 export type TranscriptCallback = (text: string, isFinal: boolean) => void;
 
@@ -8,14 +8,14 @@ export type StatusCallback = (
 ) => void;
 
 export interface LiveTranscriberConfig {
-  apiKey: string;
+  auth: ProviderAuth;
   language?: string;
   preferredModel?: string;
   fallbackModels?: string[];
 }
 
 export interface LivePipelineOptions {
-  apiKey: string;
+  auth: ProviderAuth;
   language?: string;
   preferredModel?: string;
   fallbackModels?: string[];
@@ -43,12 +43,12 @@ export interface SttProviderRuntime {
   readonly id: SttProvider;
   readonly label: string;
   createLiveTranscriber(): LiveTranscriber;
-  fetchModels(apiKey: string): Promise<string[]>;
-  validateApiKey(apiKey: string): Promise<void>;
-  validateModel(apiKey: string, model: string): Promise<void>;
-  probeModelForTranscription(apiKey: string, model: string, timeoutMs?: number): Promise<void>;
+  fetchModels(auth: ProviderAuth): Promise<string[]>;
+  validateApiKey(auth: ProviderAuth): Promise<void>;
+  validateModel(auth: ProviderAuth, model: string): Promise<void>;
+  probeModelForTranscription(auth: ProviderAuth, model: string, timeoutMs?: number): Promise<void>;
   transcribeWavBase64(
-    apiKey: string,
+    auth: ProviderAuth,
     wavBase64: string,
     language?: string,
     model?: string
